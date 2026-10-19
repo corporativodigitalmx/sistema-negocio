@@ -19,6 +19,7 @@ import Inventario from "./pages/Inventario.jsx";
 function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [passwordRecovery, setPasswordRecovery] = useState(() => window.location.hash.includes("type=recovery"));
 
   useEffect(() => {
     // 🔐 Obtener sesión
@@ -29,8 +30,10 @@ function App() {
 
     // 🔄 Escuchar cambios
     const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      (event, session) => {
         setSession(session);
+        if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+        if (event === "SIGNED_OUT") setPasswordRecovery(false);
       }
     );
 
@@ -47,6 +50,10 @@ function App() {
   }
 
   // 🔐 Si no hay sesión → LOGIN
+  if (passwordRecovery) {
+    return <Login initialMode="recovery" onRecoveryComplete={() => setPasswordRecovery(false)} />;
+  }
+
   if (!session) {
     return <Login />;
   }
