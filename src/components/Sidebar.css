@@ -1,0 +1,54 @@
+.sidebar {
+  width: 240px;
+  background: linear-gradient(180deg, #020617, #020617);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+}
+
+/* LOGO */
+.logo {
+  margin-bottom: 30px;
+}
+
+.logo h2 {
+  font-size: 28px;
+  color: #38bdf8;
+}
+
+.logo p {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+/* MENU */
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  color: #94a3b8;
+  text-decoration: none;
+  transition: 0.3s;
+}
+
+/* HOVER */
+.nav-item:hover {
+  background: #0f172a;
+  color: white;
+}
+
+/* ACTIVO (IMPORTANTE 🔥) */
+.nav-item.active {
+  background: linear-gradient(90deg, #2563eb, #06b6d4);
+  color: white;
+  box-shadow: 0 0 10px #2563eb;
+}

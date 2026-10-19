@@ -1,0 +1,96 @@
+.dashboard {
+  color: white;
+}
+
+/* HEADER */
+.header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.date-box {
+  background: #111827;
+  padding: 10px 20px;
+  border-radius: 10px;
+}
+
+/* CARDS */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 15px;
+}
+
+/* CHARTS */
+.charts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 20px;
+  gap: 20px;
+}
+
+.chart-box {
+  background: #111827;
+  padding: 20px;
+  border-radius: 15px;
+}
+
+.fake-chart {
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+}
+
+/* APPS */
+.apps {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-top: 20px;
+  gap: 10px;
+}
+
+.app-card {
+  background: #111827;
+  padding: 15px;
+  border-radius: 10px;
+  text-align: center;
+}
+
+/* TABLES */
+.tables {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  margin-top: 20px;
+  gap: 20px;
+}
+
+.table-box {
+  background: #111827;
+  padding: 20px;
+  border-radius: 15px;
+}
+
+table {
+  width: 100%;
+  margin-top: 10px;
+  font-size: 14px;
+}
+
+.ok {
+  color: #22c55e;
+}
+
+.pending {
+  color: #facc15;
+}
+
+.danger {
+  color: #ef4444;
+}
+
+.warning {
+  color: #f97316;
+}

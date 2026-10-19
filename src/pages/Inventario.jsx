@@ -1,0 +1,235 @@
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Boxes, CalendarDays, Check, Download, FileUp, Plus, Search, Trash2, UserRound, X } from "lucide-react";
+import "./Inventario.css";
+
+const KEY = "sistema-negocio:inventory:v1";
+const SERVICES = ["Netflix", "Prime Video", "Disney+", "ViX", "Spotify", "Max", "Crunchyroll", "Otro"];
+const UNITS = { days: "días", months: "meses", years: "años" };
+
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function parseDate(value) {
+  if (!value) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  return new Date(y, m - 1, d, 12);
+}
+function expiration(purchaseDate, duration, unit) {
+  const date = parseDate(purchaseDate);
+  const n = Number(duration);
+  if (!date || !Number.isInteger(n) || n < 1) return "";
+  if (unit === "days") date.setDate(date.getDate() + n);
+  else {
+    const day = date.getDate();
+    date.setDate(1);
+    if (unit === "years") date.setFullYear(date.getFullYear() + n);
+    else date.setMonth(date.getMonth() + n);
+    date.setDate(Math.min(day, new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()));
+  }
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function dateLabel(value) {
+  return parseDate(value)?.toLocaleDateString("es-MX", { day: "2-digit", month: "short", year: "numeric" }) || "—";
+}
+function daysLeft(value) {
+  const date = parseDate(value);
+  return date ? Math.round((date - parseDate(today())) / 86400000) : null;
+}
+function statusFor(value) {
+  const days = daysLeft(value);
+  if (days === null) return { key: "unknown", label: "Sin fecha" };
+  if (days < 0) return { key: "expired", label: "Vencida" };
+  if (days <= 7) return { key: "soon", label: days === 0 ? "Vence hoy" : `Vence en ${days} d` };
+  return { key: "active", label: "Vigente" };
+}
+function keyFor(userId) { return `${KEY}:${userId || "local"}`; }
+function load(userId) {
+  try {
+    const value = JSON.parse(localStorage.getItem(keyFor(userId)) || "[]");
+    return Array.isArray(value) ? value : [];
+  } catch { return []; }
+}
+function id() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`; }
+function blank() {
+  return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "1", unit: "months", customers: "", cost: "", notes: "" };
+}
+function formFrom(row) {
+  return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: String(row.duration), unit: row.unit, customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "" };
+}
+
+export default function Inventario({ userId }) {
+  const [accounts, setAccounts] = useState(() => load(userId));
+  const [query, setQuery] = useState("");
+  const [serviceFilter, setServiceFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(blank);
+  const [notice, setNotice] = useState("");
+  // localStorage is the persistence layer for this page.
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(keyFor(userId), JSON.stringify(accounts));
+// Guardado correctamente
+    } catch {
+      console.warn("No se pudo guardar el inventario en el navegador.");
+    }
+  }, [accounts, userId]);
+
+  const rows = useMemo(() => accounts
+    .map((row) => ({ ...row, expirationDate: expiration(row.purchaseDate, row.duration, row.unit) }))
+    .sort((a, b) => (a.expirationDate || "9999").localeCompare(b.expirationDate || "9999")), [accounts]);
+
+  const stats = useMemo(() => rows.reduce((sum, row) => {
+    const status = statusFor(row.expirationDate).key;
+    if (status === "soon") sum.soon += 1;
+    if (status === "expired") sum.expired += 1;
+    sum.assigned += row.customers?.length || 0;
+    return sum;
+  }, { soon: 0, expired: 0, assigned: 0 }), [rows]);
+
+  const visible = rows.filter((row) => {
+    const text = [row.service, row.accountLabel, row.provider, ...(row.customers || [])].join(" ").toLocaleLowerCase("es-MX");
+    const status = statusFor(row.expirationDate).key;
+    return (!query || text.includes(query.trim().toLocaleLowerCase("es-MX")))
+      && (serviceFilter === "all" || row.service === serviceFilter)
+      && (statusFilter === "all" || (statusFilter === "unassigned" ? !row.customers?.length : status === statusFilter));
+  });
+
+  function openNew() {
+    setEditingId(null); setForm(blank()); setNotice(""); setFormOpen(true);
+  }
+  function openEdit(row) {
+    setEditingId(row.id); setForm(formFrom(row)); setNotice(""); setFormOpen(true);
+  }
+  function closeForm() {
+    setFormOpen(false); setEditingId(null); setForm(blank());
+  }
+  function changeForm(event) {
+    const { name, value } = event.target;
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+  function save(event) {
+    event.preventDefault();
+    const duration = Number(form.duration);
+    if (!form.accountLabel.trim() || !form.provider.trim() || !form.purchaseDate || !Number.isInteger(duration) || duration < 1) {
+      setNotice("Completa identificador, proveedor, fecha y duración."); return;
+    }
+    const row = {
+      id: editingId || id(), service: form.service, accountLabel: form.accountLabel.trim(),
+      provider: form.provider.trim(), purchaseDate: form.purchaseDate, duration, unit: form.unit,
+      customers: form.customers.split(/[,\n]/).map((name) => name.trim()).filter(Boolean),
+      cost: form.cost === "" ? "" : Number(form.cost), notes: form.notes.trim(),
+    };
+    setAccounts((current) => editingId ? current.map((item) => item.id === editingId ? row : item) : [row, ...current]);
+    setNotice(editingId ? "Cuenta actualizada." : "Cuenta agregada.");
+    closeForm();
+  }
+  function remove(row) {
+    if (!window.confirm(`¿Eliminar “${row.accountLabel}” del inventario?`)) return;
+    setAccounts((current) => current.filter((item) => item.id !== row.id));
+    setNotice("Cuenta eliminada.");
+  }
+  function exportBackup() {
+    const blob = new Blob([JSON.stringify({ app: "sistema-negocio", exportedAt: new Date().toISOString(), accounts }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url; link.download = `respaldo-inventario-${today()}.json`; link.click();
+    URL.revokeObjectURL(url); setNotice("Respaldo descargado.");
+  }
+  function restoreBackup(event) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(String(reader.result));
+        const imported = Array.isArray(payload) ? payload : payload.accounts;
+        if (!Array.isArray(imported) || imported.some((row) => !row || !row.accountLabel || !row.provider || !row.purchaseDate)) throw new Error();
+        if (!window.confirm(`El respaldo reemplazará las ${accounts.length} cuentas actuales. ¿Continuar?`)) return;
+        setAccounts(imported.map((row) => ({ ...row, id: row.id || id(), customers: Array.isArray(row.customers) ? row.customers : [] })));
+        setNotice("Respaldo restaurado.");
+      } catch { setNotice("El archivo no es un respaldo válido del inventario."); }
+      finally { input.value = ""; }
+    };
+    reader.readAsText(file);
+  }
+
+  return <main className="inventory-page">
+    <header className="inventory-heading">
+      <div><p className="inventory-eyebrow">CONTROL DE SUSCRIPCIONES</p><h1>Inventario de cuentas</h1><p className="inventory-subtitle">Proveedores, vencimientos y clientes en un solo lugar.</p></div>
+      <div className="inventory-actions">
+        <button className="inv-button secondary" type="button" onClick={exportBackup} disabled={!accounts.length}><Download size={17} /> Respaldo</button>
+        <label className="inv-button secondary upload-button"><FileUp size={17} /> Restaurar<input type="file" accept="application/json,.json" onChange={restoreBackup} /></label>
+        <button className="inv-button primary" type="button" onClick={openNew}><Plus size={18} /> Nueva cuenta</button>
+      </div>
+    </header>
+
+    <div className="inventory-storage-note"><AlertTriangle size={17} /><span>Guardado en este navegador y dispositivo, separado por usuario. No guardes contraseñas aquí; descarga respaldos periódicamente.</span></div>
+    
+    {notice && <div className="inventory-notice" role="status">{notice}</div>}
+
+    <section className="inventory-stats">
+      <Stat icon={<Boxes size={19} />} label="Cuentas registradas" value={accounts.length} tone="blue" />
+      <Stat icon={<CalendarDays size={19} />} label="Vencen en 7 días" value={stats.soon} tone="amber" />
+      <Stat icon={<AlertTriangle size={19} />} label="Vencidas" value={stats.expired} tone="red" />
+      <Stat icon={<UserRound size={19} />} label="Asignaciones a clientes" value={stats.assigned} tone="green" />
+    </section>
+
+    <section className="inventory-panel">
+      <div className="inventory-toolbar">
+        <label className="inventory-search"><Search size={18} /><input aria-label="Buscar inventario" placeholder="Buscar cuenta, proveedor o cliente" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+        <div className="inventory-filters">
+          <label><span>Servicio</span><select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}><option value="all">Todos</option>{SERVICES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label><span>Estado</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos</option><option value="active">Vigentes</option><option value="soon">Por vencer</option><option value="expired">Vencidas</option><option value="unassigned">Sin asignar</option></select></label>
+        </div>
+      </div>
+
+      <div className="inventory-table-wrap">
+        <table className="inventory-table">
+          <thead><tr><th>Cuenta / servicio</th><th>Proveedor</th><th>Vencimiento</th><th>Duración</th><th>Clientes</th><th>Costo</th><th></th></tr></thead>
+          <tbody>{visible.map((row) => {
+            const status = statusFor(row.expirationDate);
+            return <tr key={row.id}>
+              <td><div className="inventory-account"><span className="service-mark">{row.service.slice(0, 1)}</span><span><strong>{row.accountLabel}</strong><small>{row.service}</small></span></div></td>
+              <td>{row.provider}</td>
+              <td><span className={`expiry-pill ${status.key}`}>{status.label}</span><small className="table-date">{dateLabel(row.expirationDate)}</small></td>
+              <td>{row.duration} {UNITS[row.unit] || "meses"}</td>
+              <td>{row.customers?.length ? <div className="customer-list">{row.customers.map((name, index) => <span key={`${name}-${index}`}>{name}</span>)}</div> : <span className="unassigned-label">Sin asignar</span>}</td>
+              <td>{row.cost === "" || row.cost == null ? "—" : new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(row.cost))}</td>
+              <td><div className="row-actions"><button type="button" onClick={() => openEdit(row)}>Editar</button><button className="delete-row" type="button" aria-label={`Eliminar ${row.accountLabel}`} onClick={() => remove(row)}><Trash2 size={16} /></button></div></td>
+            </tr>;
+          })}</tbody>
+        </table>
+        {!visible.length && <div className="inventory-empty"><span className="empty-icon"><Boxes size={25} /></span><h2>{accounts.length ? "No hay coincidencias" : "Tu inventario empieza aquí"}</h2><p>{accounts.length ? "Prueba con otra búsqueda o filtro." : "Registra una cuenta para controlar su proveedor, vencimiento y clientes."}</p>{!accounts.length && <button className="inv-button primary" onClick={openNew}><Plus size={18} /> Agregar primera cuenta</button>}</div>}
+      </div>
+      <footer className="inventory-footer"><span>{visible.length} de {accounts.length} cuentas</span><span>Vencimiento calculado desde fecha de compra + duración.</span></footer>
+    </section>
+
+    {formOpen && <div className="inventory-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm(); }}>
+      <section className="inventory-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-form-title">
+        <header className="modal-heading"><div><p className="inventory-eyebrow">{editingId ? "ACTUALIZAR REGISTRO" : "NUEVO REGISTRO"}</p><h2 id="inventory-form-title">{editingId ? "Editar cuenta" : "Agregar cuenta"}</h2></div><button type="button" className="modal-close" aria-label="Cerrar" onClick={closeForm}><X size={20} /></button></header>
+        <form className="inventory-form" onSubmit={save}>
+          <label>Servicio<select name="service" value={form.service} onChange={changeForm}>{SERVICES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label className="span-two">Identificador de cuenta<input name="accountLabel" value={form.accountLabel} onChange={changeForm} placeholder="Correo o etiqueta, sin contraseña" maxLength={120} required /></label>
+          <label>Proveedor<input name="provider" value={form.provider} onChange={changeForm} placeholder="Nombre del proveedor" maxLength={100} required /></label>
+          <label>Fecha de compra<input name="purchaseDate" type="date" value={form.purchaseDate} onChange={changeForm} required /></label>
+          <label>Duración comprada<span className="duration-fields"><input name="duration" type="number" min="1" step="1" value={form.duration} onChange={changeForm} required /><select name="unit" value={form.unit} onChange={changeForm} aria-label="Unidad">{Object.entries(UNITS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></span></label>
+          <label>Vencimiento calculado<input value={dateLabel(expiration(form.purchaseDate, form.duration, form.unit))} readOnly /></label>
+          <label className="span-two">Cliente o clientes<textarea name="customers" value={form.customers} onChange={changeForm} placeholder="Nombres separados por coma; déjalo vacío si aún está libre." rows="2" maxLength={500} /></label>
+          <label>Costo de compra (opcional)<span className="currency-field"><b>$</b><input name="cost" type="number" min="0" step="0.01" value={form.cost} onChange={changeForm} placeholder="0.00" /></span></label>
+          <label>Notas (opcional)<input name="notes" value={form.notes} onChange={changeForm} placeholder="Perfil, renovación u observaciones" maxLength={300} /></label>
+          {notice && <p className="form-notice">{notice}</p>}
+          <footer className="form-actions"><button className="inv-button secondary" type="button" onClick={closeForm}>Cancelar</button><button className="inv-button primary" type="submit"><Check size={17} /> Guardar cuenta</button></footer>
+        </form>
+      </section>
+    </div>}
+  </main>;
+}
+
+function Stat({ icon, label, value, tone }) {
+  return <article className="inventory-stat"><span className={`stat-icon ${tone}`}>{icon}</span><span><small>{label}</small><strong>{value}</strong></span></article>;
+}
