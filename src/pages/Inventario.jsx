@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Boxes, CalendarDays, Check, Download, FileUp, Plus, Search, Trash2, UserRound, X } from "lucide-react";
+import { supabase } from "../lib/supabaseClient";
 import "./Inventario.css";
 
 const KEY = "sistema-negocio:inventory:v1";
+const TABLE = "inventario_cuentas";
 const SERVICES = ["Netflix", "Prime Video", "Disney+", "ViX", "Spotify", "Max", "Crunchyroll", "Otro"];
 const UNITS = { days: "días", months: "meses", years: "años" };
 
@@ -50,7 +52,21 @@ function load(userId) {
     return Array.isArray(value) ? value : [];
   } catch { return []; }
 }
+function persistLocal(userId, records) {
+  try { localStorage.setItem(keyFor(userId), JSON.stringify(records)); }
+  catch { console.warn("No se pudo actualizar el respaldo local del inventario."); }
+}
 function id() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`; }
+function fromDatabase(row) {
+  return { id: row.id, service: row.service, accountLabel: row.account_label, provider: row.provider,
+    purchaseDate: row.purchase_date, duration: row.duration, unit: row.unit,
+    customers: Array.isArray(row.customers) ? row.customers : [], cost: row.cost ?? "", notes: row.notes || "" };
+}
+function toDatabase(row, userId) {
+  return { id: row.id, user_id: userId, service: row.service, account_label: row.accountLabel,
+    provider: row.provider, purchase_date: row.purchaseDate, duration: row.duration,
+    unit: row.unit, customers: row.customers, cost: row.cost === "" ? null : row.cost, notes: row.notes };
+}
 function blank() {
   return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "1", unit: "months", customers: "", cost: "", notes: "" };
 }
@@ -59,7 +75,10 @@ function formFrom(row) {
 }
 
 export default function Inventario({ userId }) {
-  const [accounts, setAccounts] = useState(() => load(userId));
+  const [accounts, setAccounts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
   const [query, setQuery] = useState("");
   const [serviceFilter, setServiceFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -67,16 +86,41 @@ export default function Inventario({ userId }) {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(blank);
   const [notice, setNotice] = useState("");
-  // localStorage is the persistence layer for this page.
-
   useEffect(() => {
-    try {
-      localStorage.setItem(keyFor(userId), JSON.stringify(accounts));
-// Guardado correctamente
-    } catch {
-      console.warn("No se pudo guardar el inventario en el navegador.");
+    let active = true;
+    async function loadFromSupabase() {
+      setLoading(true);
+      const { data, error } = await supabase.from(TABLE).select("*").eq("user_id", userId).order("created_at", { ascending: false });
+      if (!active) return;
+      if (error) {
+        setConnectionError(true);
+        setNotice(`No se pudo cargar desde Supabase: ${error.message}`);
+        setAccounts(load(userId));
+        setLoading(false);
+        return;
+      }
+      setConnectionError(false);
+      let records = (data || []).map(fromDatabase);
+      const localRecords = load(userId);
+      if (!records.length && localRecords.length) {
+        const { data: imported, error: importError } = await supabase.from(TABLE)
+          .upsert(localRecords.map((row) => toDatabase({ ...row, id: row.id || id() }, userId)), { onConflict: "id" })
+          .select("*");
+        if (!active) return;
+        if (importError) {
+          setNotice(`No se pudo migrar el inventario local: ${importError.message}`);
+          records = localRecords;
+        } else {
+          records = (imported || []).map(fromDatabase);
+          setNotice(`Se migraron ${records.length} cuentas locales a Supabase.`);
+        }
+      }
+      setAccounts(records);
+      setLoading(false);
     }
-  }, [accounts, userId]);
+    if (userId) loadFromSupabase();
+    return () => { active = false; };
+  }, [userId]);
 
   const rows = useMemo(() => accounts
     .map((row) => ({ ...row, expirationDate: expiration(row.purchaseDate, row.duration, row.unit) }))
@@ -111,7 +155,7 @@ export default function Inventario({ userId }) {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
   }
-  function save(event) {
+  async function save(event) {
     event.preventDefault();
     const duration = Number(form.duration);
     if (!form.accountLabel.trim() || !form.provider.trim() || !form.purchaseDate || !Number.isInteger(duration) || duration < 1) {
@@ -123,14 +167,25 @@ export default function Inventario({ userId }) {
       customers: form.customers.split(/[,\n]/).map((name) => name.trim()).filter(Boolean),
       cost: form.cost === "" ? "" : Number(form.cost), notes: form.notes.trim(),
     };
-    setAccounts((current) => editingId ? current.map((item) => item.id === editingId ? row : item) : [row, ...current]);
-    setNotice(editingId ? "Cuenta actualizada." : "Cuenta agregada.");
+    setSaving(true);
+    const result = editingId
+      ? await supabase.from(TABLE).update(toDatabase(row, userId)).eq("id", editingId).eq("user_id", userId).select("*").single()
+      : await supabase.from(TABLE).insert(toDatabase(row, userId)).select("*").single();
+    setSaving(false);
+    if (result.error) { setNotice(`No se pudo guardar en Supabase: ${result.error.message}`); return; }
+    const saved = fromDatabase(result.data);
+    setAccounts((current) => editingId ? current.map((item) => item.id === editingId ? saved : item) : [saved, ...current]);
+    persistLocal(userId, editingId ? accounts.map((item) => item.id === editingId ? saved : item) : [saved, ...accounts]);
+    setNotice(editingId ? "Cuenta actualizada en Supabase." : "Cuenta agregada en Supabase.");
     closeForm();
   }
-  function remove(row) {
+  async function remove(row) {
     if (!window.confirm(`¿Eliminar “${row.accountLabel}” del inventario?`)) return;
+    const { error } = await supabase.from(TABLE).delete().eq("id", row.id).eq("user_id", userId);
+    if (error) { setNotice(`No se pudo eliminar en Supabase: ${error.message}`); return; }
     setAccounts((current) => current.filter((item) => item.id !== row.id));
-    setNotice("Cuenta eliminada.");
+    persistLocal(userId, accounts.filter((item) => item.id !== row.id));
+    setNotice("Cuenta eliminada de Supabase.");
   }
   function exportBackup() {
     const blob = new Blob([JSON.stringify({ app: "sistema-negocio", exportedAt: new Date().toISOString(), accounts }, null, 2)], { type: "application/json" });
@@ -149,9 +204,19 @@ export default function Inventario({ userId }) {
         const payload = JSON.parse(String(reader.result));
         const imported = Array.isArray(payload) ? payload : payload.accounts;
         if (!Array.isArray(imported) || imported.some((row) => !row || !row.accountLabel || !row.provider || !row.purchaseDate)) throw new Error();
-        if (!window.confirm(`El respaldo reemplazará las ${accounts.length} cuentas actuales. ¿Continuar?`)) return;
-        setAccounts(imported.map((row) => ({ ...row, id: row.id || id(), customers: Array.isArray(row.customers) ? row.customers : [] })));
-        setNotice("Respaldo restaurado.");
+        if (!window.confirm(`El respaldo agregará o actualizará sus ${imported.length} cuentas en Supabase. ¿Continuar?`)) return;
+        void (async () => {
+          const normalized = imported.map((row) => ({ ...row, id: row.id || id(), customers: Array.isArray(row.customers) ? row.customers : [] }));
+          setSaving(true);
+          const { data, error } = await supabase.from(TABLE).upsert(normalized.map((row) => toDatabase(row, userId)), { onConflict: "id" }).select("*");
+          setSaving(false);
+          if (error) { setNotice(`No se pudo restaurar en Supabase: ${error.message}`); return; }
+          const restored = (data || []).map(fromDatabase);
+          const merged = [...restored, ...accounts.filter((current) => !restored.some((item) => item.id === current.id))];
+          setAccounts(merged);
+          persistLocal(userId, merged);
+          setNotice("Respaldo combinado con el inventario de Supabase.");
+        })();
       } catch { setNotice("El archivo no es un respaldo válido del inventario."); }
       finally { input.value = ""; }
     };
@@ -168,7 +233,7 @@ export default function Inventario({ userId }) {
       </div>
     </header>
 
-    <div className="inventory-storage-note"><AlertTriangle size={17} /><span>Guardado en este navegador y dispositivo, separado por usuario. No guardes contraseñas aquí; descarga respaldos periódicamente.</span></div>
+    <div className="inventory-storage-note"><AlertTriangle size={17} /><span>{loading ? "Conectando con Supabase…" : connectionError ? "Supabase no está disponible; se muestra el respaldo local si existe. Los cambios no se guardarán hasta restablecer la conexión." : "Guardado en Supabase, separado por usuario. No guardes contraseñas aquí; descarga respaldos periódicamente."}</span></div>
     
     {notice && <div className="inventory-notice" role="status">{notice}</div>}
 
@@ -204,7 +269,7 @@ export default function Inventario({ userId }) {
             </tr>;
           })}</tbody>
         </table>
-        {!visible.length && <div className="inventory-empty"><span className="empty-icon"><Boxes size={25} /></span><h2>{accounts.length ? "No hay coincidencias" : "Tu inventario empieza aquí"}</h2><p>{accounts.length ? "Prueba con otra búsqueda o filtro." : "Registra una cuenta para controlar su proveedor, vencimiento y clientes."}</p>{!accounts.length && <button className="inv-button primary" onClick={openNew}><Plus size={18} /> Agregar primera cuenta</button>}</div>}
+        {!loading && !visible.length && <div className="inventory-empty"><span className="empty-icon"><Boxes size={25} /></span><h2>{accounts.length ? "No hay coincidencias" : "Tu inventario empieza aquí"}</h2><p>{accounts.length ? "Prueba con otra búsqueda o filtro." : "Registra una cuenta para controlar su proveedor, vencimiento y clientes."}</p>{!accounts.length && <button className="inv-button primary" onClick={openNew}><Plus size={18} /> Agregar primera cuenta</button>}</div>}
       </div>
       <footer className="inventory-footer"><span>{visible.length} de {accounts.length} cuentas</span><span>Vencimiento calculado desde fecha de compra + duración.</span></footer>
     </section>
@@ -223,7 +288,7 @@ export default function Inventario({ userId }) {
           <label>Costo de compra (opcional)<span className="currency-field"><b>$</b><input name="cost" type="number" min="0" step="0.01" value={form.cost} onChange={changeForm} placeholder="0.00" /></span></label>
           <label>Notas (opcional)<input name="notes" value={form.notes} onChange={changeForm} placeholder="Perfil, renovación u observaciones" maxLength={300} /></label>
           {notice && <p className="form-notice">{notice}</p>}
-          <footer className="form-actions"><button className="inv-button secondary" type="button" onClick={closeForm}>Cancelar</button><button className="inv-button primary" type="submit"><Check size={17} /> Guardar cuenta</button></footer>
+          <footer className="form-actions"><button className="inv-button secondary" type="button" onClick={closeForm} disabled={saving}>Cancelar</button><button className="inv-button primary" type="submit" disabled={saving}><Check size={17} /> {saving ? "Guardando…" : "Guardar cuenta"}</button></footer>
         </form>
       </section>
     </div>}
