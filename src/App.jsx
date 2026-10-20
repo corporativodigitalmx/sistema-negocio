@@ -20,6 +20,7 @@ import Tasks from "./pages/Tasks.jsx";
 import Reports from "./pages/Reports.jsx";
 import Support from "./pages/Support.jsx";
 import Settings from "./pages/Settings.jsx";
+import Store from "./pages/Store.jsx";
 
 function AccessGuard({allowed,fallback,children}) { return allowed ? children : <Navigate to={fallback} replace />; }
 
@@ -79,6 +80,8 @@ function App() {
   if (passwordRecovery) {
     return <Login initialMode="recovery" onRecoveryComplete={() => setPasswordRecovery(false)} />;
   }
+
+  if (window.location.pathname === "/tienda") return <Store />;
 
   if (!session) {
     return <Login />;

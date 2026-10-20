@@ -89,6 +89,7 @@ export default function Login({ initialMode = "register", onRecoveryComplete }) 
           <span className="auth-brand-mark">CD</span>
           <span>Corporativo Digital</span>
         </a>
+        <a className="auth-top-link auth-store-link" href="/tienda"><ShoppingBag size={15} /> Tienda en línea</a>
       </header>
       <section className="auth-layout" aria-label="Acceso a Sistema Negocio">
         <div className="auth-intro">

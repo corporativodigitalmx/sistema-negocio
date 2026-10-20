@@ -27,6 +27,7 @@
 .auth-topbar { display: flex; width: min(100%, 1040px); align-items: center; gap: 17px; }
 .auth-top-link { display: inline-flex; min-height: 40px; align-items: center; gap: 8px; padding: 0 13px; border: 1px solid rgba(125, 211, 252, .28); border-radius: 10px; background: rgba(14, 165, 233, .1); color: #bae6fd; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .18s, border-color .18s, transform .18s; }
 .auth-top-link:hover, .auth-top-link.active { border-color: rgba(125, 211, 252, .55); background: rgba(14, 165, 233, .2); transform: translateY(-1px); }
+.auth-store-link { margin-left: auto; text-decoration: none; }
 .auth-glow { position: absolute; z-index: -1; width: 520px; height: 520px; border-radius: 50%; filter: blur(110px); opacity: .2; pointer-events: none; }
 .auth-glow-one { top: -280px; left: -150px; background: #2379c8; }
 .auth-glow-two { right: -300px; bottom: -330px; background: #7653d8; }
@@ -94,8 +95,11 @@
   .auth-topbar, .auth-layout { width: min(100%, 440px); }
   .auth-topbar { gap: 10px; }
   .auth-top-link { min-height: 38px; padding: 0 10px; font-size: 11px; }
+  .auth-store-link { margin-left: 0; }
   .auth-brand { gap: 8px; font-size: 12px; }
   .auth-brand-mark { width: 36px; height: 36px; }
+  .auth-store-link { padding: 0 8px; font-size: 0; }
+  .auth-store-link svg { width: 16px; height: 16px; }
   .auth-layout { grid-template-columns: 1fr; gap: 20px; }
   .auth-intro { min-height: auto; }
   .auth-intro-copy { padding: 38px 0 6px; }

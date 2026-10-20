@@ -704,3 +704,10 @@ body {
   .inventory-modal { max-height: calc(100vh - 20px); padding: 17px; }
   .inventory-form { gap: 11px; }
 }
+.inventory-store-fields{display:grid;gap:12px;padding:14px;border:1px solid rgba(56,189,248,.16);border-radius:11px;background:rgba(8,21,36,.55)}
+.inventory-store-fields>label,.inventory-store-prices>label{display:grid;gap:6px;color:#bac8d8;font-size:11px;font-weight:700}
+.inventory-store-fields textarea,.inventory-store-fields input:not([type=checkbox]){width:100%;min-height:39px;padding:9px 10px;border:1px solid #2b4059;border-radius:8px;background:#091422;color:#e5edf6;font:inherit;font-size:12px}
+.inventory-store-toggle{display:flex!important;align-items:center;gap:9px}.inventory-store-toggle input{accent-color:#0ea5e9}
+.inventory-store-prices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.inventory-store-fields>small{color:#8194ac;font-size:10px;line-height:1.5}
+@media(max-width:560px){.inventory-store-prices{grid-template-columns:1fr}}

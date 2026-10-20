@@ -60,18 +60,26 @@ function id() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Mat
 function fromDatabase(row) {
   return { id: row.id, ownerId: row.user_id, service: row.service, accountLabel: row.account_label, provider: row.provider,
     purchaseDate: row.purchase_date, duration: row.duration, unit: row.unit,
-    profileCapacity: row.profile_capacity ?? 5, customers: Array.isArray(row.customers) ? row.customers : [], cost: row.cost ?? "", notes: row.notes || "" };
+    profileCapacity: row.profile_capacity ?? 5, customers: Array.isArray(row.customers) ? row.customers : [], cost: row.cost ?? "", notes: row.notes || "",
+    storePublished: row.store_published ?? false, storeTitle: row.store_title || row.service, storeDescription: row.store_description || "",
+    storePublicProfilePrice: row.store_public_profile_price ?? "", storePublicAccountPrice: row.store_public_account_price ?? "",
+    storeResellerProfilePrice: row.store_reseller_profile_price ?? "", storeResellerAccountPrice: row.store_reseller_account_price ?? "" };
 }
 function toDatabase(row, userId) {
   return { id: row.id, user_id: row.ownerId || userId, service: row.service, account_label: row.accountLabel,
     provider: row.provider, purchase_date: row.purchaseDate, duration: 28,
-    unit: "days", profile_capacity: Number(row.profileCapacity || 5), customers: row.customers, cost: row.cost === "" ? null : row.cost, notes: row.notes };
+    unit: "days", profile_capacity: Number(row.profileCapacity || 5), customers: row.customers, cost: row.cost === "" ? null : row.cost, notes: row.notes,
+    store_published: Boolean(row.storePublished), store_title: row.storeTitle || row.service, store_description: row.storeDescription || "",
+    store_public_profile_price: row.storePublicProfilePrice === "" ? null : Number(row.storePublicProfilePrice),
+    store_public_account_price: row.storePublicAccountPrice === "" ? null : Number(row.storePublicAccountPrice),
+    store_reseller_profile_price: row.storeResellerProfilePrice === "" ? null : Number(row.storeResellerProfilePrice),
+    store_reseller_account_price: row.storeResellerAccountPrice === "" ? null : Number(row.storeResellerAccountPrice) };
 }
 function blank() {
-  return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", profileCapacity: "5", customers: "", cost: "", notes: "" };
+  return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", profileCapacity: "5", customers: "", cost: "", notes: "", storePublished: false, storeTitle: "", storeDescription: "", storePublicProfilePrice: "", storePublicAccountPrice: "", storeResellerProfilePrice: "", storeResellerAccountPrice: "" };
 }
 function formFrom(row) {
-  return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: "28", unit: "days", profileCapacity: String(row.profileCapacity ?? 5), customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "" };
+  return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: "28", unit: "days", profileCapacity: String(row.profileCapacity ?? 5), customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "", storePublished: row.storePublished || false, storeTitle: row.storeTitle || row.service, storeDescription: row.storeDescription || "", storePublicProfilePrice: row.storePublicProfilePrice ?? "", storePublicAccountPrice: row.storePublicAccountPrice ?? "", storeResellerProfilePrice: row.storeResellerProfilePrice ?? "", storeResellerAccountPrice: row.storeResellerAccountPrice ?? "" };
 }
 
 export default function Inventario({ userId, isSuperadmin = false, canViewAll = isSuperadmin, canEdit = true }) {
@@ -176,6 +184,10 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
       profileCapacity,
       customers: form.customers.split(/[,\n]/).map((name) => name.trim()).filter(Boolean),
       cost: form.cost === "" ? "" : Number(form.cost), notes: form.notes.trim(),
+      storePublished: form.storePublished, storeTitle: form.storeTitle.trim() || form.service,
+      storeDescription: form.storeDescription.trim(), storePublicProfilePrice: form.storePublicProfilePrice,
+      storePublicAccountPrice: form.storePublicAccountPrice, storeResellerProfilePrice: form.storeResellerProfilePrice,
+      storeResellerAccountPrice: form.storeResellerAccountPrice,
     };
     setSaving(true);
     const result = editingId
@@ -298,6 +310,18 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
           <label className="span-two">Cliente o clientes<textarea name="customers" value={form.customers} onChange={changeForm} placeholder="Nombres separados por coma; déjalo vacío si aún está libre." rows="2" maxLength={500} /></label>
           <label>Costo de compra (opcional)<span className="currency-field"><b>$</b><input name="cost" type="number" min="0" step="0.01" value={form.cost} onChange={changeForm} placeholder="0.00" /></span></label>
           <label>Notas (opcional)<input name="notes" value={form.notes} onChange={changeForm} placeholder="Perfil, renovación u observaciones" maxLength={300} /></label>
+            {isSuperadmin && <div className="inventory-store-fields span-two">
+            <label className="inventory-store-toggle"><input type="checkbox" name="storePublished" checked={form.storePublished} onChange={(event) => setForm((current) => ({ ...current, storePublished: event.target.checked }))} /> Publicar esta cuenta en la tienda</label>
+            <label>Nombre visible<input name="storeTitle" value={form.storeTitle} onChange={changeForm} placeholder={form.service} maxLength={100} /></label>
+            <label>Descripción para el cliente<textarea name="storeDescription" value={form.storeDescription} onChange={changeForm} rows="2" maxLength={300} placeholder="Detalles visibles en la tienda" /></label>
+            <div className="inventory-store-prices">
+              <label>Perfil · precio público<input name="storePublicProfilePrice" type="number" min="0" step="0.01" value={form.storePublicProfilePrice} onChange={changeForm} placeholder="0.00" /></label>
+              <label>Perfil · precio revendedor<input name="storeResellerProfilePrice" type="number" min="0" step="0.01" value={form.storeResellerProfilePrice} onChange={changeForm} placeholder="0.00" /></label>
+              <label>Cuenta completa · público<input name="storePublicAccountPrice" type="number" min="0" step="0.01" value={form.storePublicAccountPrice} onChange={changeForm} placeholder="0.00" /></label>
+              <label>Cuenta completa · revendedor<input name="storeResellerAccountPrice" type="number" min="0" step="0.01" value={form.storeResellerAccountPrice} onChange={changeForm} placeholder="0.00" /></label>
+            </div>
+            <small>Solo se publica si hay precio configurado y existencia disponible. Los datos de acceso de la cuenta nunca se muestran.</small>
+          </div>}
           {notice && <p className="form-notice">{notice}</p>}
           <footer className="form-actions"><button className="inv-button secondary" type="button" onClick={closeForm} disabled={saving}>Cancelar</button><button className="inv-button primary" type="submit" disabled={saving}><Check size={17} /> {saving ? "Guardando…" : "Guardar cuenta"}</button></footer>
         </form>
