@@ -60,18 +60,18 @@ function id() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Mat
 function fromDatabase(row) {
   return { id: row.id, ownerId: row.user_id, service: row.service, accountLabel: row.account_label, provider: row.provider,
     purchaseDate: row.purchase_date, duration: row.duration, unit: row.unit,
-    customers: Array.isArray(row.customers) ? row.customers : [], cost: row.cost ?? "", notes: row.notes || "" };
+    profileCapacity: row.profile_capacity ?? 5, customers: Array.isArray(row.customers) ? row.customers : [], cost: row.cost ?? "", notes: row.notes || "" };
 }
 function toDatabase(row, userId) {
   return { id: row.id, user_id: row.ownerId || userId, service: row.service, account_label: row.accountLabel,
     provider: row.provider, purchase_date: row.purchaseDate, duration: 28,
-    unit: "days", customers: row.customers, cost: row.cost === "" ? null : row.cost, notes: row.notes };
+    unit: "days", profile_capacity: Number(row.profileCapacity || 5), customers: row.customers, cost: row.cost === "" ? null : row.cost, notes: row.notes };
 }
 function blank() {
-  return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", customers: "", cost: "", notes: "" };
+  return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", profileCapacity: "5", customers: "", cost: "", notes: "" };
 }
 function formFrom(row) {
-  return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: "28", unit: "days", customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "" };
+  return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: "28", unit: "days", profileCapacity: String(row.profileCapacity ?? 5), customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "" };
 }
 
 export default function Inventario({ userId, isSuperadmin = false, canViewAll = isSuperadmin, canEdit = true }) {
@@ -163,12 +163,17 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   async function save(event) {
     event.preventDefault();
     const duration = Number(form.duration);
+    const profileCapacity = Number(form.profileCapacity);
     if (!form.accountLabel.trim() || !form.provider.trim() || !form.purchaseDate || !Number.isInteger(duration) || duration < 1) {
       setNotice("Completa identificador, proveedor, fecha y duración."); return;
+    }
+    if (!Number.isInteger(profileCapacity) || profileCapacity < 1 || profileCapacity > 20) {
+      setNotice("La capacidad debe ser de 1 a 20 perfiles."); return;
     }
     const row = {
       id: editingId || id(), service: form.service, accountLabel: form.accountLabel.trim(),
       provider: form.provider.trim(), purchaseDate: form.purchaseDate, duration: 28, unit: "days",
+      profileCapacity,
       customers: form.customers.split(/[,\n]/).map((name) => name.trim()).filter(Boolean),
       cost: form.cost === "" ? "" : Number(form.cost), notes: form.notes.trim(),
     };
@@ -287,6 +292,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
           <label className="span-two">Identificador de cuenta<input name="accountLabel" value={form.accountLabel} onChange={changeForm} placeholder="Correo o etiqueta, sin contraseña" maxLength={120} required /></label>
           <label>Proveedor<input name="provider" list="inventory-provider-options" value={form.provider} onChange={changeForm} placeholder="Nombre del proveedor" maxLength={100} required /><datalist id="inventory-provider-options">{supplierSuggestions.map((supplier)=><option key={supplier.name} value={supplier.name}/>)}</datalist></label>
           <label>Fecha de compra<input name="purchaseDate" type="date" value={form.purchaseDate} onChange={changeForm} required /></label>
+          <label>Perfiles disponibles<input name="profileCapacity" type="number" min="1" max="20" value={form.profileCapacity} onChange={changeForm} required /><small>Cuántos perfiles puede compartir esta cuenta.</small></label>
           <label>Duración del ciclo<input value="28 días" readOnly /></label>
           <label>Vencimiento calculado<input value={dateLabel(expiration(form.purchaseDate, form.duration, form.unit))} readOnly /></label>
           <label className="span-two">Cliente o clientes<textarea name="customers" value={form.customers} onChange={changeForm} placeholder="Nombres separados por coma; déjalo vacío si aún está libre." rows="2" maxLength={500} /></label>

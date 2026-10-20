@@ -37,6 +37,7 @@ export default function Clientes({ userId, canEdit = true }) {
   const [clients, setClients] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [availability, setAvailability] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,12 +50,13 @@ export default function Clientes({ userId, canEdit = true }) {
 
   const reload = useCallback(async () => {
     setLoading(true);
-    const [clientsResult, assignmentsResult, accountsResult] = await Promise.all([
+    const [clientsResult, assignmentsResult, accountsResult, availabilityResult] = await Promise.all([
       supabase.from("clients").select("*").order("full_name"),
       supabase.from("client_account_assignments")
-        .select("id,user_id,client_id,inventory_account_id,profile_name,starts_on,duration_days,expires_on,notes,created_at,inventory:inventario_cuentas!client_account_assignments_inventory_account_id_fkey(id,service,account_label,provider,user_id)")
+        .select("id,user_id,client_id,inventory_account_id,profile_name,delivery_type,starts_on,duration_days,expires_on,notes,created_at,inventory:inventario_cuentas!client_account_assignments_inventory_account_id_fkey(id,service,account_label,provider,user_id)")
         .order("created_at", { ascending: false }),
       supabase.from("inventario_cuentas").select("id,service,account_label,provider,user_id").order("service"),
+      supabase.from("inventory_account_availability").select("inventory_account_id,profile_capacity,available_profiles,has_full_account,status"),
     ]);
     if (clientsResult.error) setNotice(`No se pudieron cargar clientes. Aplica la migración de clientes en Supabase. Detalle: ${clientsResult.error.message}`);
     else setClients(clientsResult.data || []);
@@ -62,6 +64,7 @@ export default function Clientes({ userId, canEdit = true }) {
     else setAssignments(assignmentsResult.data || []);
     if (accountsResult.error) setNotice(`No se pudieron consultar cuentas del inventario: ${accountsResult.error.message}`);
     else setAccounts(accountsResult.data || []);
+    if (!availabilityResult.error) setAvailability(availabilityResult.data || []);
     setLoading(false);
   }, []);
 
@@ -106,16 +109,16 @@ export default function Clientes({ userId, canEdit = true }) {
       setNotice("Selecciona una cuenta y escribe el perfil asignado."); return;
     }
     setSaving(true); setNotice("");
-    const { data, error } = await supabase.from("client_account_assignments").insert({
-      user_id: selected.user_id, client_id: selected.id, inventory_account_id: assignmentForm.inventory_account_id,
-      profile_name: assignmentForm.profile_name.trim(), starts_on: assignmentForm.starts_on, duration_days: 28,
-      notes: assignmentForm.notes.trim(),
-    }).select("id,user_id,client_id,inventory_account_id,profile_name,starts_on,duration_days,expires_on,notes,created_at,inventory:inventario_cuentas!client_account_assignments_inventory_account_id_fkey(id,service,account_label,provider,user_id)").single();
+    const { data, error } = await supabase.rpc("assign_client_account", {
+      p_client_id: selected.id, p_inventory_account_id: assignmentForm.inventory_account_id,
+      p_profile_name: assignmentForm.profile_name.trim(), p_starts_on: assignmentForm.starts_on,
+      p_notes: assignmentForm.notes.trim(),
+    });
     setSaving(false);
     if (error) { setNotice(`No se pudo asignar la cuenta: ${error.message}`); return; }
-    setAssignments((current) => [data, ...current]);
     setAssignmentForm({ inventory_account_id: "", profile_name: "", starts_on: today(), notes: "" });
-    setNotice("Cuenta asignada por 28 días. La asignación anterior permanece en el historial.");
+    setNotice(`${data?.profile_name || "Perfil"} asignado por 28 días. La asignación anterior permanece en el historial.`);
+    await reload();
   }
 
   if (selected) return <main className="clients-page">
@@ -129,7 +132,7 @@ export default function Clientes({ userId, canEdit = true }) {
     </section>
     {canEdit && <form className="client-assignment-form" onSubmit={assignAccount}>
       <div className="client-form-heading"><div><p className="clients-eyebrow">NUEVA ASIGNACIÓN</p><h2>Asignar cuenta o perfil</h2></div><span>Duración fija: <strong>28 días</strong></span></div>
-      <label>Cuenta del inventario<select value={assignmentForm.inventory_account_id} onChange={(event) => setAssignmentForm((current) => ({ ...current, inventory_account_id: event.target.value }))} required><option value="">Selecciona una cuenta disponible</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.service} · {account.account_label} · {account.provider}</option>)}</select></label>
+      <label>Cuenta del inventario<select value={assignmentForm.inventory_account_id} onChange={(event) => setAssignmentForm((current) => ({ ...current, inventory_account_id: event.target.value }))} required><option value="">Selecciona una cuenta disponible</option>{accounts.filter(account=>availability.find(item=>item.inventory_account_id===account.id)?.available_profiles>0&&!availability.find(item=>item.inventory_account_id===account.id)?.has_full_account).map((account) => {const available=availability.find(item=>item.inventory_account_id===account.id);return <option key={account.id} value={account.id}>{account.service} · {account.account_label} · {available?.available_profiles} perfil(es) libre(s)</option>;})}</select></label>
       <label>Perfil asignado<input value={assignmentForm.profile_name} onChange={(event) => setAssignmentForm((current) => ({ ...current, profile_name: event.target.value }))} placeholder="Ej. Perfil 2, PIN familiar…" maxLength={80} required /></label>
       <label>Fecha de inicio<input type="date" value={assignmentForm.starts_on} onChange={(event) => setAssignmentForm((current) => ({ ...current, starts_on: event.target.value }))} required /></label>
       <label>Notas (opcional)<input value={assignmentForm.notes} onChange={(event) => setAssignmentForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Observaciones" maxLength={250} /></label>

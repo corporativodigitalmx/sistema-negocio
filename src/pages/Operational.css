@@ -40,3 +40,11 @@
   .dashboard-live .op-table-card { padding: 12px; }
   .dashboard-live .op-table-card > header { align-items: flex-start; flex-direction: column; }
 }
+.sales-new-client { display: flex; align-items: end; gap: 8px; padding-bottom: 7px; color: #94a3b8; font-size: 12px; }
+.op-status.available { background: #0c302a; color: #6ee7b7; }
+.op-status.occupied { background: #351b24; color: #fda4af; }
+.sales-new-client button { display: inline-flex; align-items: center; gap: 5px; }
+.sales-inline-client { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; padding: 12px; border: 1px solid #263449; border-radius: 10px; background: #0b1423; }
+.sales-inline-client .op-button { grid-column: 1 / -1; justify-self: start; }
+.op-batch-textarea { width: 100%; box-sizing: border-box; margin-top: 7px; padding: 11px; border: 1px solid #334155; border-radius: 8px; background: #111e32; color: white; font: inherit; line-height: 1.55; resize: vertical; }
+@media (max-width: 760px) { .sales-new-client { flex-wrap: wrap; align-items: center; } .sales-inline-client { grid-template-columns: 1fr; } }
