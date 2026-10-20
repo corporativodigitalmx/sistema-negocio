@@ -15,10 +15,17 @@ import Pagos from "./pages/Pagos";
 import Proveedores from "./pages/Proveedores";
 import Login from "./pages/login.jsx";
 import Inventario from "./pages/Inventario.jsx";
+import Admin from "./pages/Admin.jsx";
+import Tasks from "./pages/Tasks.jsx";
+
+function AccessGuard({allowed,fallback,children}) { return allowed ? children : <Navigate to={fallback} replace />; }
 
 function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [access, setAccess] = useState(null);
+  const [accessLoading, setAccessLoading] = useState(false);
+  const [accessError, setAccessError] = useState("");
   const [passwordRecovery, setPasswordRecovery] = useState(() => window.location.hash.includes("type=recovery"));
 
   useEffect(() => {
@@ -40,6 +47,22 @@ function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  const sessionUserId = session?.user?.id;
+  useEffect(() => {
+    let active = true;
+    async function loadAccess() {
+      if (!sessionUserId) { setAccess(null); return; }
+      setAccessLoading(true); setAccessError("");
+      const { data, error } = await supabase.from("user_access").select("user_id,email,full_name,role,permissions").eq("user_id", sessionUserId).maybeSingle();
+      if (!active) return;
+      if (error || !data) { setAccessError(error?.message || "No existe el perfil de permisos para esta cuenta."); setAccess(null); }
+      else setAccess(data);
+      setAccessLoading(false);
+    }
+    loadAccess();
+    return () => { active = false; };
+  }, [sessionUserId]);
+
   // ⏳ Loading inicial
   if (loading) {
     return (
@@ -58,13 +81,19 @@ function App() {
     return <Login />;
   }
 
+  if (accessLoading || (!access && !accessError)) return <div style={styles.loading}><p>Preparando permisos…</p></div>;
+  if (accessError) return <div style={styles.loading}><section><p>No se pudo cargar tu perfil de acceso: {accessError}</p><button onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></section></div>;
+  const isAdmin = access?.role === "superadmin";
+  const can = (key) => isAdmin || Boolean(access?.permissions?.[key]);
+  const landing = can("dashboard_view") ? "/" : can("inventory_view") ? "/inventario" : can("tasks_view") ? "/tareas" : "/sin-acceso";
+
   // 🚀 APP PRINCIPAL
   return (
     <BrowserRouter>
       <div style={styles.app}>
 
         {/* SIDEBAR */}
-        <Sidebar />
+        <Sidebar access={access} />
 
         {/* CONTENIDO */}
         <div style={styles.main}>
@@ -75,13 +104,16 @@ function App() {
           {/* RUTAS */}
           <div style={styles.content}>
             <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/clientes" element={<Clientes />} />
-              <Route path="/cuentas" element={<Cuentas />} />
-              <Route path="/ventas" element={<Ventas />} />
-              <Route path="/pagos" element={<Pagos />} />
-              <Route path="/proveedores" element={<Proveedores />} />
-              <Route path="/inventario" element={<Inventario userId={session.user.id} />} />
+              <Route path="/" element={<AccessGuard allowed={can("dashboard_view")} fallback={landing}><Dashboard /></AccessGuard>} />
+              <Route path="/clientes" element={<AccessGuard allowed={can("clients_view")} fallback={landing}><Clientes /></AccessGuard>} />
+              <Route path="/cuentas" element={<AccessGuard allowed={can("accounts_view")} fallback={landing}><Cuentas /></AccessGuard>} />
+              <Route path="/ventas" element={<AccessGuard allowed={can("sales_view")} fallback={landing}><Ventas /></AccessGuard>} />
+              <Route path="/pagos" element={<AccessGuard allowed={can("payments_view")} fallback={landing}><Pagos /></AccessGuard>} />
+              <Route path="/proveedores" element={<AccessGuard allowed={can("suppliers_view")} fallback={landing}><Proveedores /></AccessGuard>} />
+              <Route path="/inventario" element={<AccessGuard allowed={can("inventory_view")} fallback={landing}><Inventario userId={session.user.id} isSuperadmin={isAdmin} canEdit={can("inventory_edit")} /></AccessGuard>} />
+              <Route path="/tareas" element={<AccessGuard allowed={can("tasks_view")} fallback={landing}><Tasks user={session.user} canManage={can("tasks_manage")} /></AccessGuard>} />
+              <Route path="/administracion" element={isAdmin ? <Admin /> : <Navigate to={landing} replace />} />
+              <Route path="/sin-acceso" element={<div style={{color:"white"}}><h1>Sin módulos asignados</h1><p>Solicita al administrador que habilite tu acceso.</p></div>} />
 
               {/* Redirección */}
               <Route path="*" element={<Navigate to="/" />} />

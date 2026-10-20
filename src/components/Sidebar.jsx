@@ -1,60 +1,18 @@
 import { NavLink } from "react-router-dom";
-import {
-  LayoutDashboard,
-  Users,
-  CreditCard,
-  ShoppingCart,
-  Wallet,
-  Truck,
-  Boxes,
-  BarChart3,
-  Settings,
-  Headphones
-} from "lucide-react";
-
+import { LayoutDashboard, Users, CreditCard, ShoppingCart, Wallet, Truck, Boxes, BarChart3, Settings, Headphones, ClipboardList, ShieldCheck } from "lucide-react";
 import "./Sidebar.css";
-
-export default function Sidebar() {
-  return (
-    <div className="sidebar">
-
-      {/* LOGO */}
-      <div className="logo">
-        <h2>CD</h2>
-        <p>Corporativo Digital MX</p>
-      </div>
-
-      {/* MENU */}
-      <nav className="menu">
-
-        <NavItem to="/" icon={<LayoutDashboard />} label="Dashboard" />
-        <NavItem to="/clientes" icon={<Users />} label="Clientes" />
-        <NavItem to="/cuentas" icon={<CreditCard />} label="Cuentas" />
-        <NavItem to="/ventas" icon={<ShoppingCart />} label="Ventas" />
-        <NavItem to="/pagos" icon={<Wallet />} label="Pagos" />
-        <NavItem to="/proveedores" icon={<Truck />} label="Proveedores" />
-        <NavItem to="/inventario" icon={<Boxes />} label="Inventario" />
-        <NavItem to="/reportes" icon={<BarChart3 />} label="Reportes" />
-        <NavItem to="/soporte" icon={<Headphones />} label="Soporte" />
-        <NavItem to="/configuracion" icon={<Settings />} label="Configuración" />
-
-      </nav>
-
-      {/* SOPORTE */}
-      <div className="support-box">
-        <p>Soporte</p>
-        <span className="online">● En línea</span>
-      </div>
-
-    </div>
-  );
-}
-
-function NavItem({ to, icon, label }) {
-  return (
-    <NavLink to={to} className="nav-item">
-      {icon}
-      <span>{label}</span>
-    </NavLink>
-  );
-}
+export default function Sidebar({access}) { const admin=access?.role==="superadmin"; const can=key=>admin||Boolean(access?.permissions?.[key]); return <div className="sidebar"><div className="logo"><h2>CD</h2><p>Corporativo Digital MX</p></div><nav className="menu">
+{can("dashboard_view")&&<NavItem to="/" icon={<LayoutDashboard/>} label="Dashboard"/>}
+{can("clients_view")&&<NavItem to="/clientes" icon={<Users/>} label="Clientes"/>}
+{can("accounts_view")&&<NavItem to="/cuentas" icon={<CreditCard/>} label="Cuentas"/>}
+{can("sales_view")&&<NavItem to="/ventas" icon={<ShoppingCart/>} label="Ventas"/>}
+{can("payments_view")&&<NavItem to="/pagos" icon={<Wallet/>} label="Pagos"/>}
+{can("suppliers_view")&&<NavItem to="/proveedores" icon={<Truck/>} label="Proveedores"/>}
+{can("inventory_view")&&<NavItem to="/inventario" icon={<Boxes/>} label="Inventario"/>}
+{can("reports_view")&&<NavItem to="/reportes" icon={<BarChart3/>} label="Reportes"/>}
+{can("support_view")&&<NavItem to="/soporte" icon={<Headphones/>} label="Soporte"/>}
+{can("tasks_view")&&<NavItem to="/tareas" icon={<ClipboardList/>} label="Tareas"/>}
+{admin&&<NavItem to="/administracion" icon={<ShieldCheck/>} label="Administración"/>}
+{can("settings_view")&&<NavItem to="/configuracion" icon={<Settings/>} label="Configuración"/>}
+</nav><div className="support-box"><p>Soporte</p><span className="online">● En línea</span></div></div> }
+function NavItem({to,icon,label}) { return <NavLink to={to} className="nav-item">{icon}<span>{label}</span></NavLink> }

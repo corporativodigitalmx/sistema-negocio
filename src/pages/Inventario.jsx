@@ -58,7 +58,7 @@ function persistLocal(userId, records) {
 }
 function id() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`; }
 function fromDatabase(row) {
-  return { id: row.id, service: row.service, accountLabel: row.account_label, provider: row.provider,
+  return { id: row.id, ownerId: row.user_id, service: row.service, accountLabel: row.account_label, provider: row.provider,
     purchaseDate: row.purchase_date, duration: row.duration, unit: row.unit,
     customers: Array.isArray(row.customers) ? row.customers : [], cost: row.cost ?? "", notes: row.notes || "" };
 }
@@ -74,7 +74,7 @@ function formFrom(row) {
   return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: String(row.duration), unit: row.unit, customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "" };
 }
 
-export default function Inventario({ userId }) {
+export default function Inventario({ userId, isSuperadmin = false, canEdit = true }) {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -90,7 +90,9 @@ export default function Inventario({ userId }) {
     let active = true;
     async function loadFromSupabase() {
       setLoading(true);
-      const { data, error } = await supabase.from(TABLE).select("*").eq("user_id", userId).order("created_at", { ascending: false });
+      let request = supabase.from(TABLE).select("*");
+      if (!isSuperadmin) request = request.eq("user_id", userId);
+      const { data, error } = await request.order("created_at", { ascending: false });
       if (!active) return;
       if (error) {
         setConnectionError(true);
@@ -120,7 +122,7 @@ export default function Inventario({ userId }) {
     }
     if (userId) loadFromSupabase();
     return () => { active = false; };
-  }, [userId]);
+  }, [userId, isSuperadmin]);
 
   const rows = useMemo(() => accounts
     .map((row) => ({ ...row, expirationDate: expiration(row.purchaseDate, row.duration, row.unit) }))
@@ -169,8 +171,8 @@ export default function Inventario({ userId }) {
     };
     setSaving(true);
     const result = editingId
-      ? await supabase.from(TABLE).update(toDatabase(row, userId)).eq("id", editingId).eq("user_id", userId).select("*").single()
-      : await supabase.from(TABLE).insert(toDatabase(row, userId)).select("*").single();
+      ? await supabase.from(TABLE).update(toDatabase({ ...row, ownerId: accounts.find((item) => item.id === editingId)?.ownerId || userId }, userId)).eq("id", editingId).select("*").single()
+      : await supabase.from(TABLE).insert(toDatabase({ ...row, ownerId: userId }, userId)).select("*").single();
     setSaving(false);
     if (result.error) { setNotice(`No se pudo guardar en Supabase: ${result.error.message}`); return; }
     const saved = fromDatabase(result.data);
@@ -181,7 +183,7 @@ export default function Inventario({ userId }) {
   }
   async function remove(row) {
     if (!window.confirm(`¿Eliminar “${row.accountLabel}” del inventario?`)) return;
-    const { error } = await supabase.from(TABLE).delete().eq("id", row.id).eq("user_id", userId);
+    const { error } = await supabase.from(TABLE).delete().eq("id", row.id);
     if (error) { setNotice(`No se pudo eliminar en Supabase: ${error.message}`); return; }
     setAccounts((current) => current.filter((item) => item.id !== row.id));
     persistLocal(userId, accounts.filter((item) => item.id !== row.id));
@@ -229,7 +231,7 @@ export default function Inventario({ userId }) {
       <div className="inventory-actions">
         <button className="inv-button secondary" type="button" onClick={exportBackup} disabled={!accounts.length}><Download size={17} /> Respaldo</button>
         <label className="inv-button secondary upload-button"><FileUp size={17} /> Restaurar<input type="file" accept="application/json,.json" onChange={restoreBackup} /></label>
-        <button className="inv-button primary" type="button" onClick={openNew}><Plus size={18} /> Nueva cuenta</button>
+        {canEdit && <button className="inv-button primary" type="button" onClick={openNew}><Plus size={18} /> Nueva cuenta</button>}
       </div>
     </header>
 
@@ -265,11 +267,11 @@ export default function Inventario({ userId }) {
               <td>{row.duration} {UNITS[row.unit] || "meses"}</td>
               <td>{row.customers?.length ? <div className="customer-list">{row.customers.map((name, index) => <span key={`${name}-${index}`}>{name}</span>)}</div> : <span className="unassigned-label">Sin asignar</span>}</td>
               <td>{row.cost === "" || row.cost == null ? "—" : new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(row.cost))}</td>
-              <td><div className="row-actions"><button type="button" onClick={() => openEdit(row)}>Editar</button><button className="delete-row" type="button" aria-label={`Eliminar ${row.accountLabel}`} onClick={() => remove(row)}><Trash2 size={16} /></button></div></td>
+              <td><div className="row-actions">{canEdit && <><button type="button" onClick={() => openEdit(row)}>Editar</button><button className="delete-row" type="button" aria-label={`Eliminar ${row.accountLabel}`} onClick={() => remove(row)}><Trash2 size={16} /></button></>}</div></td>
             </tr>;
           })}</tbody>
         </table>
-        {!loading && !visible.length && <div className="inventory-empty"><span className="empty-icon"><Boxes size={25} /></span><h2>{accounts.length ? "No hay coincidencias" : "Tu inventario empieza aquí"}</h2><p>{accounts.length ? "Prueba con otra búsqueda o filtro." : "Registra una cuenta para controlar su proveedor, vencimiento y clientes."}</p>{!accounts.length && <button className="inv-button primary" onClick={openNew}><Plus size={18} /> Agregar primera cuenta</button>}</div>}
+        {!loading && !visible.length && <div className="inventory-empty"><span className="empty-icon"><Boxes size={25} /></span><h2>{accounts.length ? "No hay coincidencias" : "Tu inventario empieza aquí"}</h2><p>{accounts.length ? "Prueba con otra búsqueda o filtro." : "Registra una cuenta para controlar su proveedor, vencimiento y clientes."}</p>{!accounts.length && canEdit && <button className="inv-button primary" onClick={openNew}><Plus size={18} /> Agregar primera cuenta</button>}</div>}
       </div>
       <footer className="inventory-footer"><span>{visible.length} de {accounts.length} cuentas</span><span>Vencimiento calculado desde fecha de compra + duración.</span></footer>
     </section>
