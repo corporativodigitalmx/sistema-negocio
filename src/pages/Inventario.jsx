@@ -57,6 +57,12 @@ function persistLocal(userId, records) {
   catch { console.warn("No se pudo actualizar el respaldo local del inventario."); }
 }
 function id() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`; }
+function generateAccountIdentifier(service, recordId = id()) {
+  const prefix = String(service || "CUENTA").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 10).toUpperCase() || "CUENTA";
+  const suffix = recordId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8).toUpperCase();
+  return `${prefix}-${suffix}`;
+}
+function validEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value); }
 function fromDatabase(row) {
   return { id: row.id, ownerId: row.user_id, service: row.service, accountLabel: row.account_label, provider: row.provider,
     purchaseDate: row.purchase_date, duration: row.duration, unit: row.unit,
@@ -77,7 +83,7 @@ function toDatabase(row, userId) {
     store_reseller_account_price: row.storeResellerAccountPrice === "" ? null : Number(row.storeResellerAccountPrice) };
 }
 function blank() {
-  return { service: "Netflix", accountLabel: "", accessUsername: "", accessPassword: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", profileCapacity: "5", customers: "", cost: "", notes: "", storePublished: false, storeTitle: "", storeDescription: "", storePublicProfilePrice: "", storePublicAccountPrice: "", storeResellerProfilePrice: "", storeResellerAccountPrice: "" };
+  return { service: "Netflix", accountLabel: generateAccountIdentifier("Netflix"), accessUsername: "", accessPassword: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", profileCapacity: "5", customers: "", cost: "", notes: "", storePublished: false, storeTitle: "", storeDescription: "", storePublicProfilePrice: "", storePublicAccountPrice: "", storeResellerProfilePrice: "", storeResellerAccountPrice: "" };
 }
 function formFrom(row) {
   return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: "28", unit: "days", profileCapacity: String(row.profileCapacity ?? 5), customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "", storePublished: row.storePublished || false, storeTitle: row.storeTitle || row.service, storeDescription: row.storeDescription || "", storePublicProfilePrice: row.storePublicProfilePrice ?? "", storePublicAccountPrice: row.storePublicAccountPrice ?? "", storeResellerProfilePrice: row.storeResellerProfilePrice ?? "", storeResellerAccountPrice: row.storeResellerAccountPrice ?? "" };
@@ -90,21 +96,31 @@ function parseInventoryBatch(value, defaults) {
   if (!Number.isInteger(sharedCapacity) || sharedCapacity < 1 || sharedCapacity > 20) return { error: "La capacidad debe ser de 1 a 20 perfiles." };
   const rows = [];
   for (const [index, line] of lines.entries()) {
-    const structured = line.includes("|") || line.includes("\t");
-    const fields = structured ? line.split(line.includes("|") ? "|" : "\t").map((field) => field.trim()) : [line];
-    if (fields.length > 5) return { error: `Línea ${index + 1}: máximo 5 columnas (servicio, cuenta, proveedor, perfiles, fecha).` };
-    const [serviceField, labelField, providerField, capacityField, dateField] = fields;
+    const fields = line.split(line.includes("|") ? "|" : "\t").map((field) => field.trim());
+    if (fields.length < 2 || fields.length > 3) return { error: `Línea ${index + 1}: usa correo | contraseña, o servicio | correo | contraseña.` };
+    const [firstField, secondField, thirdField] = fields;
+    const service = fields.length === 3 ? firstField : defaults.service;
+    const accessUsername = (fields.length === 3 ? secondField : firstField).trim();
+    const accessPassword = fields.length === 3 ? thirdField : secondField;
+    const recordId = id();
     const row = {
-      service: (structured ? serviceField : defaults.service) || defaults.service,
-      accountLabel: (structured ? labelField : labelField || serviceField || "").trim(),
-      provider: (providerField || defaults.provider).trim(),
-      profileCapacity: capacityField ? Number(capacityField) : sharedCapacity,
-      purchaseDate: dateField || defaults.purchaseDate,
+      id: recordId,
+      service,
+      accountLabel: generateAccountIdentifier(service, recordId),
+      accessUsername,
+      accessPassword,
+      provider: defaults.provider.trim(),
+      profileCapacity: sharedCapacity,
+      purchaseDate: defaults.purchaseDate,
     };
-    if (!row.accountLabel) return { error: `Línea ${index + 1}: falta el identificador de la cuenta.` };
-    if (!row.provider) return { error: `Línea ${index + 1}: indica un proveedor general o uno en la fila.` };
-    if (row.accountLabel.length > 120 || row.provider.length > 100 || row.service.length > 100) return { error: `Línea ${index + 1}: revisa el largo de servicio, cuenta o proveedor.` };
-    if (!Number.isInteger(row.profileCapacity) || row.profileCapacity < 1 || row.profileCapacity > 20) return { error: `Línea ${index + 1}: perfiles debe ser un número entre 1 y 20.` };
+    if (!row.service || row.service.length > 100) return { error: `Línea ${index + 1}: indica una plataforma válida.` };
+    if (!validEmail(row.accessUsername) || row.accessUsername.length > 254) return { error: `Línea ${index + 1}: escribe un correo electrónico válido.` };
+    if (!row.accessPassword || row.accessPassword.length > 500) return { error: `Línea ${index + 1}: agrega una contraseña de hasta 500 caracteres.` };
+    if (!row.provider) return { error: "Indica el proveedor general del lote." };
+    if (row.provider.length > 100) return { error: `Línea ${index + 1}: revisa el largo del proveedor.` };
+    const duplicate = rows.some((item) => item.service.toLocaleLowerCase("es-MX") === row.service.toLocaleLowerCase("es-MX") && item.accessUsername.toLocaleLowerCase("es-MX") === row.accessUsername.toLocaleLowerCase("es-MX"));
+    if (duplicate) return { error: `Línea ${index + 1}: este correo ya aparece para esa plataforma en el lote.` };
+    if (!Number.isInteger(row.profileCapacity) || row.profileCapacity < 1 || row.profileCapacity > 20) return { error: "La capacidad debe ser de 1 a 20 perfiles." };
     const date = parseDate(row.purchaseDate);
     if (!date || date.toISOString().slice(0, 10) !== row.purchaseDate) return { error: `Línea ${index + 1}: fecha inválida; usa AAAA-MM-DD.` };
     rows.push(row);
@@ -237,7 +253,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   }
   function changeForm(event) {
     const { name, value } = event.target;
-    setForm((current) => ({ ...current, [name]: value }));
+    setForm((current) => ({ ...current, [name]: value, ...(name === "service" && !editingId ? { accountLabel: generateAccountIdentifier(value) } : {}) }));
   }
   async function save(event) {
     event.preventDefault();
@@ -248,6 +264,9 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     }
     if (!Number.isInteger(profileCapacity) || profileCapacity < 1 || profileCapacity > 20) {
       setNotice("La capacidad debe ser de 1 a 20 perfiles."); return;
+    }
+    if (!form.accessUsername.trim() || !validEmail(form.accessUsername.trim()) || !form.accessPassword) {
+      setNotice("Agrega el correo electrónico y la contraseña de acceso de la cuenta."); return;
     }
     const existingAccount = editingId ? accounts.find((item) => item.id === editingId) : null;
     const storeFields = isSuperadmin ? {
@@ -280,7 +299,16 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     const { error: credentialsError } = await supabase.rpc("save_inventory_account_credentials", {
       p_inventory_account_id: saved.id, p_username: form.accessUsername.trim(), p_password: form.accessPassword,
     });
-    if (credentialsError) { setSaving(false); setNotice(`La cuenta se guardó, pero sus accesos no: ${credentialsError.message}. Edita la cuenta para volver a guardar usuario y contraseña.`); return; }
+    if (credentialsError) {
+      if (!editingId) {
+        const { error: cleanupError } = await supabase.from(TABLE).delete().eq("id", saved.id);
+        if (!cleanupError) {
+          const remaining = accounts.filter((item) => item.id !== saved.id);
+          setAccounts(remaining); persistLocal(userId, remaining);
+        }
+      }
+      setSaving(false); setNotice(`No se pudieron guardar los accesos: ${credentialsError.message}${!editingId ? " Se intentó retirar la cuenta incompleta del inventario." : " La cuenta conserva sus accesos anteriores."}`); return;
+    }
     setSaving(false);
     setNotice(editingId ? "Cuenta actualizada en Supabase." : "Cuenta agregada en Supabase.");
     closeForm();
@@ -301,26 +329,33 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     setBatchNotice("");
     const parsed = parseInventoryBatch(batchText, batchDefaults);
     if (parsed.error) { setBatchNotice(parsed.error); return; }
-    const existing = new Set(accounts.map((row) => row.accountLabel.trim().toLocaleLowerCase("es-MX")));
-    const added = new Set();
-    for (const row of parsed.rows) {
-      const key = row.accountLabel.toLocaleLowerCase("es-MX");
-      if (existing.has(key) || added.has(key)) {
-        setBatchNotice(`La cuenta “${row.accountLabel}” está repetida en el inventario o en la lista.`);
-        return;
-      }
-      added.add(key);
-    }
     setBatchSaving(true);
     const rowsToInsert = parsed.rows.map((row) => toDatabase({
-      id: id(), ownerId: userId, ...row, duration: 28, unit: "days", customers: [], cost: "", notes: "",
+      ...row, ownerId: userId, duration: 28, unit: "days", customers: [], cost: "", notes: "",
       storePublished: false, storeTitle: "", storeDescription: "", storePublicProfilePrice: "",
       storePublicAccountPrice: "", storeResellerProfilePrice: "", storeResellerAccountPrice: "",
     }, userId));
     const { data, error } = await supabase.from(TABLE).insert(rowsToInsert).select("*");
-    setBatchSaving(false);
-    if (error) { setBatchNotice(`No se pudo guardar el lote en Supabase: ${error.message}`); return; }
+    if (error) { setBatchSaving(false); setBatchNotice(`No se pudo guardar el lote en Supabase: ${error.message}`); return; }
     const savedRows = (data || []).map(fromDatabase);
+    const credentialsById = new Map(parsed.rows.map((row) => [row.id, row]));
+    const credentialResults = await Promise.all((data || []).map((row) => {
+      const credentials = credentialsById.get(row.id);
+      return supabase.rpc("save_inventory_account_credentials", {
+        p_inventory_account_id: row.id, p_username: credentials.accessUsername, p_password: credentials.accessPassword,
+      });
+    }));
+    const failedCredentials = credentialResults.find((result) => result.error)?.error;
+    if (failedCredentials) {
+      const insertedIds = (data || []).map((row) => row.id);
+      const { error: cleanupError } = await supabase.from(TABLE).delete().in("id", insertedIds);
+      setBatchSaving(false);
+      setBatchNotice(cleanupError
+        ? `No se guardaron todos los accesos (${failedCredentials.message}) y no se pudo retirar todo el lote. Revisa Inventario y elimina las cuentas incompletas.`
+        : `No se guardaron los accesos del lote (${failedCredentials.message}); se retiraron las cuentas incompletas. Corrige los datos y vuelve a intentar.`);
+      return;
+    }
+    setBatchSaving(false);
     const merged = [...savedRows, ...accounts];
     setAccounts(merged);
     persistLocal(userId, merged);
@@ -452,12 +487,12 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
         <header className="modal-heading"><div><p className="inventory-eyebrow">CARGA POR LOTE · HASTA 10</p><h2 id="inventory-batch-title">Pega las cuentas</h2></div><button type="button" className="modal-close" aria-label="Cerrar" onClick={() => !batchSaving && setBatchOpen(false)}><X size={20} /></button></header>
         <form className="inventory-form" onSubmit={saveBatch}>
           <label>Servicio general<select value={batchDefaults.service} onChange={(event) => setBatchDefaults((current) => ({ ...current, service: event.target.value }))}>{SERVICES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label>Proveedor general<input value={batchDefaults.provider} onChange={(event) => setBatchDefaults((current) => ({ ...current, provider: event.target.value }))} placeholder="Se puede reemplazar en cada fila" maxLength={100} /></label>
+          <label>Proveedor general<input value={batchDefaults.provider} onChange={(event) => setBatchDefaults((current) => ({ ...current, provider: event.target.value }))} placeholder="Nombre del proveedor" maxLength={100} required /></label>
           <label>Fecha de compra general<input type="date" value={batchDefaults.purchaseDate} onChange={(event) => setBatchDefaults((current) => ({ ...current, purchaseDate: event.target.value }))} required /></label>
           <label>Perfiles por cuenta<input type="number" min="1" max="20" value={batchDefaults.profileCapacity} onChange={(event) => setBatchDefaults((current) => ({ ...current, profileCapacity: event.target.value }))} required /></label>
           <div className="inventory-batch-input span-two">
             <div className="inventory-batch-input-heading"><label htmlFor="inventory-batch-list">Lista de cuentas</label><button className="inv-button secondary" type="button" onClick={pasteBatchFromClipboard}><ClipboardPaste size={16} /> Pegar portapapeles</button></div>
-            <textarea id="inventory-batch-list" value={batchText} onChange={(event) => { setBatchText(event.target.value); setBatchNotice(""); }} rows="8" placeholder={"Una cuenta por línea:\ncuenta1@email.com\ncuenta2@email.com\n\nO una fila con columnas: Servicio | identificador | proveedor | perfiles | fecha (AAAA-MM-DD)"} required />
+            <textarea id="inventory-batch-list" value={batchText} onChange={(event) => { setBatchText(event.target.value); setBatchNotice(""); }} rows="8" placeholder={"Una cuenta por línea:\ncorreo1@email.com | contraseña1\ncorreo2@email.com | contraseña2\n\nO especifica servicio: Max | correo@email.com | contraseña"} required />
             <small>{batchText.split(/\r?\n/).filter((line) => line.trim()).length} / 10 cuentas. Las líneas vacías se ignoran.</small>
           </div>
           {batchNotice && <p className="form-notice span-two" role="status">{batchNotice}</p>}
@@ -471,8 +506,8 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
         <header className="modal-heading"><div><p className="inventory-eyebrow">{editingId ? "ACTUALIZAR REGISTRO" : "NUEVO REGISTRO"}</p><h2 id="inventory-form-title">{editingId ? "Editar cuenta" : "Agregar cuenta"}</h2></div><button type="button" className="modal-close" aria-label="Cerrar" onClick={closeForm}><X size={20} /></button></header>
         <form className="inventory-form" onSubmit={save}>
           <label>Servicio<select name="service" value={form.service} onChange={changeForm}>{SERVICES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label className="span-two">Identificador de cuenta<input name="accountLabel" value={form.accountLabel} onChange={changeForm} placeholder="Correo o etiqueta de referencia" maxLength={120} required /></label>
-          <div className="inventory-access-fields span-two"><strong>Accesos para la entrega</strong><p>Se guardan aparte del inventario, en un esquema privado, y no aparecen en el catálogo público.</p><label>Usuario o correo<input name="accessUsername" value={form.accessUsername} onChange={changeForm} autoComplete="off" maxLength={254} placeholder="Correo o nombre de usuario" /></label><label>Contraseña<input name="accessPassword" type="password" value={form.accessPassword} onChange={changeForm} autoComplete="new-password" maxLength={500} placeholder={editingId ? "Contraseña guardada o escribe una nueva" : "Contraseña de la cuenta"} /></label></div>
+          <label className="span-two">Identificador generado automáticamente<input name="accountLabel" value={form.accountLabel} readOnly aria-readonly="true" /></label>
+          <div className="inventory-access-fields span-two"><strong>Accesos de la cuenta</strong><p>El correo y la contraseña se guardan aparte del inventario y no aparecen en el catálogo público.</p><label>Correo electrónico<input name="accessUsername" type="email" value={form.accessUsername} onChange={changeForm} autoComplete="off" maxLength={254} placeholder="correo@ejemplo.com" required /></label><label>Contraseña<input name="accessPassword" type="password" value={form.accessPassword} onChange={changeForm} autoComplete="new-password" maxLength={500} placeholder={editingId ? "Contraseña guardada o escribe una nueva" : "Contraseña de la cuenta"} required /></label></div>
           <label>Proveedor<input name="provider" list="inventory-provider-options" value={form.provider} onChange={changeForm} placeholder="Nombre del proveedor" maxLength={100} required /><datalist id="inventory-provider-options">{supplierSuggestions.map((supplier)=><option key={supplier.name} value={supplier.name}/>)}</datalist></label>
           <label>Fecha de compra<input name="purchaseDate" type="date" value={form.purchaseDate} onChange={changeForm} required /></label>
           <label>Perfiles disponibles<input name="profileCapacity" type="number" min="1" max="20" value={form.profileCapacity} onChange={changeForm} required /><small>Cuántos perfiles puede compartir esta cuenta.</small></label>
