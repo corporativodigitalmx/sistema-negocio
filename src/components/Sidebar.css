@@ -52,3 +52,40 @@
   color: white;
   box-shadow: 0 0 10px #2563eb;
 }
+
+.sidebar { flex: 0 0 240px; min-height: 0; overflow-y: auto; }
+.sidebar .logo h2, .sidebar .logo p { margin-top: 0; }
+@media (max-width: 760px) {
+  .sidebar {
+    width: 100%;
+    height: 58px;
+    min-height: 58px;
+    flex: 0 0 58px;
+    padding: 5px 8px;
+    border-bottom: 1px solid #1e293b;
+    overflow: hidden;
+  }
+  .sidebar .logo { display: none; }
+  .sidebar .menu {
+    width: 100%;
+    height: 100%;
+    flex: 1;
+    flex-direction: row;
+    align-items: center;
+    gap: 5px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+  }
+  .sidebar .menu::-webkit-scrollbar { display: none; }
+  .sidebar .nav-item {
+    flex: 0 0 auto;
+    justify-content: center;
+    gap: 6px;
+    padding: 9px 10px;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+  .sidebar .nav-item svg { width: 17px; height: 17px; }
+}

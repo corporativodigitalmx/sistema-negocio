@@ -17,4 +17,4 @@ export default function Sidebar({access}) { const admin=access?.role==="superadm
 {admin&&<NavItem to="/administracion" icon={<ShieldCheck/>} label="Administración"/>}
 
 </nav></div> }
-function NavItem({to,icon,label}) { return <NavLink to={to} className="nav-item">{icon}<span>{label}</span></NavLink> }
+function NavItem({to,icon,label}) { return <NavLink to={to} className="nav-item" title={label} aria-label={label}>{icon}<span>{label}</span></NavLink> }

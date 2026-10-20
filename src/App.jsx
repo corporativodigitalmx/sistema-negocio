@@ -93,19 +93,19 @@ function App() {
   // 🚀 APP PRINCIPAL
   return (
     <BrowserRouter>
-      <div style={styles.app}>
+      <div className="app-shell" style={styles.app}>
 
         {/* SIDEBAR */}
         <Sidebar access={access} />
 
         {/* CONTENIDO */}
-        <div style={styles.main}>
+        <div className="app-main" style={styles.main}>
 
           {/* TOPBAR */}
           <Topbar user={session.user} />
 
           {/* RUTAS */}
-          <div style={styles.content}>
+          <div className="app-content" style={styles.content}>
             <Routes>
               <Route path="/" element={<AccessGuard allowed={can("dashboard_view")} fallback={landing}><Dashboard user={session.user} /></AccessGuard>} />
               <Route path="/clientes" element={<AccessGuard allowed={can("clients_view")} fallback={landing}><Clientes userId={session.user.id} canEdit={can("clients_edit")} /></AccessGuard>} />
