@@ -165,6 +165,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   const [assignmentOpen, setAssignmentOpen] = useState(false);
   const [assignmentAccount, setAssignmentAccount] = useState(null);
   const [assignmentClients, setAssignmentClients] = useState([]);
+  const [assignmentStatuses, setAssignmentStatuses] = useState(null);
   const [assignmentClientId, setAssignmentClientId] = useState("");
   const [assignmentType, setAssignmentType] = useState("profile");
   const [assignmentDate, setAssignmentDate] = useState(today());
@@ -245,6 +246,18 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
 
   useEffect(() => {
     let active = true;
+    if (canEdit) supabase.rpc("inventory_assignment_statuses").then(({ data, error }) => {
+      if (!active) return;
+      setAssignmentStatuses(error ? {} : Object.fromEntries((data || []).map((row) => [row.inventory_account_id, {
+        availableProfiles: row.available_profiles,
+        occupied: row.account_occupied,
+      }])));
+    });
+    return () => { active = false; };
+  }, [canEdit, userId, accounts]);
+
+  useEffect(() => {
+    let active = true;
     if (!assignmentOpen || !assignmentAccount) return () => { active = false; };
     supabase.rpc("inventory_account_assignment_options", {
       p_inventory_account_id: assignmentAccount.id,
@@ -317,6 +330,15 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
       return;
     }
     const client = assignmentClients.find((item) => item.id === assignmentClientId);
+    const remainingProfiles = Math.max(0, Number(assignmentAvailability?.available_profiles || 0) - (assignmentType === "profile" ? 1 : 0));
+    const startsTodayOrEarlier = assignmentDate <= today();
+    setAssignmentStatuses((current) => ({
+      ...(current || {}),
+      [assignmentAccount.id]: {
+        availableProfiles: startsTodayOrEarlier ? remainingProfiles : assignmentAvailability?.available_profiles || 0,
+        occupied: startsTodayOrEarlier && (assignmentType === "full_account" || remainingProfiles === 0),
+      },
+    }));
     setAssignmentOpen(false);
     setNotice(`${data?.profile_name || (assignmentType === "full_account" ? "Cuenta completa" : "Perfil")} asignado a ${client?.full_name || "cliente"}. Vigencia: 28 días.`);
   }
@@ -555,7 +577,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
               <td>{row.duration} {UNITS[row.unit] || "meses"}</td>
               <td>{row.customers?.length ? <div className="customer-list">{row.customers.map((name, index) => <span key={`${name}-${index}`}>{name}</span>)}</div> : <span className="unassigned-label">Sin asignar</span>}</td>
               <td>{row.cost === "" || row.cost == null ? "—" : new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(row.cost))}</td>
-              <td><div className="row-actions">{canEdit && <>{row.operationalStatus === "available" && status.key !== "expired" && <button className="assign-account-button" type="button" onClick={() => openAssignment(row)} title="Asignar a un cliente">Asignar</button>}<button type="button" onClick={() => openEdit(row)}>Editar</button><button className="delete-row" type="button" aria-label={`Eliminar ${row.accountLabel}`} onClick={() => remove(row)}><Trash2 size={16} /></button></>}</div></td>
+              <td><div className="row-actions">{canEdit && <>{row.operationalStatus === "available" && status.key !== "expired" && <button className={`assign-account-button${assignmentStatuses?.[row.id]?.occupied ? " occupied" : ""}`} type="button" onClick={() => !assignmentStatuses?.[row.id]?.occupied && openAssignment(row)} disabled={assignmentStatuses === null || Boolean(assignmentStatuses?.[row.id]?.occupied)} title={assignmentStatuses?.[row.id]?.occupied ? "Esta cuenta ya está ocupada" : "Asignar a un cliente"}>{assignmentStatuses === null ? "Cargando…" : assignmentStatuses?.[row.id]?.occupied ? "Ocupada" : "Asignar"}</button>}<button type="button" onClick={() => openEdit(row)}>Editar</button><button className="delete-row" type="button" aria-label={`Eliminar ${row.accountLabel}`} onClick={() => remove(row)}><Trash2 size={16} /></button></>}</div></td>
             </tr>;
           })}</tbody>
         </table>
