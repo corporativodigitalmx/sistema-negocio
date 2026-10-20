@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Boxes, CalendarDays, Check, ClipboardPaste, Download, FileUp, Plus, Search, Trash2, UserRound, X } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import "./Inventario.css";
@@ -77,7 +77,7 @@ function toDatabase(row, userId) {
     store_reseller_account_price: row.storeResellerAccountPrice === "" ? null : Number(row.storeResellerAccountPrice) };
 }
 function blank() {
-  return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", profileCapacity: "5", customers: "", cost: "", notes: "", storePublished: false, storeTitle: "", storeDescription: "", storePublicProfilePrice: "", storePublicAccountPrice: "", storeResellerProfilePrice: "", storeResellerAccountPrice: "" };
+  return { service: "Netflix", accountLabel: "", accessUsername: "", accessPassword: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", profileCapacity: "5", customers: "", cost: "", notes: "", storePublished: false, storeTitle: "", storeDescription: "", storePublicProfilePrice: "", storePublicAccountPrice: "", storeResellerProfilePrice: "", storeResellerAccountPrice: "" };
 }
 function formFrom(row) {
   return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: "28", unit: "days", profileCapacity: String(row.profileCapacity ?? 5), customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "", storePublished: row.storePublished || false, storeTitle: row.storeTitle || row.service, storeDescription: row.storeDescription || "", storePublicProfilePrice: row.storePublicProfilePrice ?? "", storePublicAccountPrice: row.storePublicAccountPrice ?? "", storeResellerProfilePrice: row.storeResellerProfilePrice ?? "", storeResellerAccountPrice: row.storeResellerAccountPrice ?? "" };
@@ -133,6 +133,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   const [issueDescription, setIssueDescription] = useState("");
   const [issueSaving, setIssueSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const credentialsRequest = useRef(0);
   const [form, setForm] = useState(blank);
   const [notice, setNotice] = useState("");
   const [supplierSuggestions, setSupplierSuggestions] = useState([]);
@@ -197,6 +198,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   });
 
   function openNew() {
+    credentialsRequest.current += 1;
     setEditingId(null); setForm(blank()); setNotice(""); setFormOpen(true);
   }
   async function reportIssue(event) {
@@ -221,10 +223,16 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     setBatchDefaults({ service: "Netflix", provider: "", purchaseDate: today(), profileCapacity: "5" });
     setBatchOpen(true);
   }
-  function openEdit(row) {
-    setEditingId(row.id); setForm(formFrom(row)); setNotice(""); setFormOpen(true);
+  async function openEdit(row) {
+    const requestId = ++credentialsRequest.current;
+    setEditingId(row.id); setForm({ ...formFrom(row), accessUsername: "", accessPassword: "" }); setNotice(""); setFormOpen(true);
+    const { data, error } = await supabase.rpc("get_inventory_account_credentials", { p_inventory_account_id: row.id });
+    if (credentialsRequest.current !== requestId) return;
+    if (error) { setNotice(`No se pudieron cargar las credenciales: ${error.message}`); return; }
+    setForm((current) => ({ ...current, accessUsername: data?.username || "", accessPassword: data?.password || "" }));
   }
   function closeForm() {
+    credentialsRequest.current += 1;
     setFormOpen(false); setEditingId(null); setForm(blank());
   }
   function changeForm(event) {
@@ -265,11 +273,15 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     const result = editingId
       ? await supabase.from(TABLE).update(toDatabase({ ...row, ownerId: accounts.find((item) => item.id === editingId)?.ownerId || userId }, userId)).eq("id", editingId).select("*").single()
       : await supabase.from(TABLE).insert(toDatabase({ ...row, ownerId: userId }, userId)).select("*").single();
-    setSaving(false);
-    if (result.error) { setNotice(`No se pudo guardar en Supabase: ${result.error.message}`); return; }
+    if (result.error) { setSaving(false); setNotice(`No se pudo guardar en Supabase: ${result.error.message}`); return; }
     const saved = fromDatabase(result.data);
     setAccounts((current) => editingId ? current.map((item) => item.id === editingId ? saved : item) : [saved, ...current]);
     persistLocal(userId, editingId ? accounts.map((item) => item.id === editingId ? saved : item) : [saved, ...accounts]);
+    const { error: credentialsError } = await supabase.rpc("save_inventory_account_credentials", {
+      p_inventory_account_id: saved.id, p_username: form.accessUsername.trim(), p_password: form.accessPassword,
+    });
+    if (credentialsError) { setSaving(false); setNotice(`La cuenta se guardó, pero sus accesos no: ${credentialsError.message}. Edita la cuenta para volver a guardar usuario y contraseña.`); return; }
+    setSaving(false);
     setNotice(editingId ? "Cuenta actualizada en Supabase." : "Cuenta agregada en Supabase.");
     closeForm();
   }
@@ -371,7 +383,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
       </div>
     </header>
 
-    <div className="inventory-storage-note"><AlertTriangle size={17} /><span>{loading ? "Conectando con Supabase…" : connectionError ? "Supabase no está disponible; se muestra el respaldo local si existe. Los cambios no se guardarán hasta restablecer la conexión." : "Guardado en Supabase, separado por usuario. No guardes contraseñas aquí; descarga respaldos periódicamente."}</span></div>
+    <div className="inventory-storage-note"><AlertTriangle size={17} /><span>{loading ? "Conectando con Supabase…" : connectionError ? "Supabase no está disponible; se muestra el respaldo local si existe. Los cambios no se guardarán hasta restablecer la conexión." : "Los accesos se guardan aparte en Supabase y solo se entregan al personal autorizado al registrar una venta. No se incluyen en respaldos descargables."}</span></div>
     
     {notice && <div className="inventory-notice" role="status">{notice}</div>}
 
@@ -459,7 +471,8 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
         <header className="modal-heading"><div><p className="inventory-eyebrow">{editingId ? "ACTUALIZAR REGISTRO" : "NUEVO REGISTRO"}</p><h2 id="inventory-form-title">{editingId ? "Editar cuenta" : "Agregar cuenta"}</h2></div><button type="button" className="modal-close" aria-label="Cerrar" onClick={closeForm}><X size={20} /></button></header>
         <form className="inventory-form" onSubmit={save}>
           <label>Servicio<select name="service" value={form.service} onChange={changeForm}>{SERVICES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label className="span-two">Identificador de cuenta<input name="accountLabel" value={form.accountLabel} onChange={changeForm} placeholder="Correo o etiqueta, sin contraseña" maxLength={120} required /></label>
+          <label className="span-two">Identificador de cuenta<input name="accountLabel" value={form.accountLabel} onChange={changeForm} placeholder="Correo o etiqueta de referencia" maxLength={120} required /></label>
+          <div className="inventory-access-fields span-two"><strong>Accesos para la entrega</strong><p>Se guardan aparte del inventario, en un esquema privado, y no aparecen en el catálogo público.</p><label>Usuario o correo<input name="accessUsername" value={form.accessUsername} onChange={changeForm} autoComplete="off" maxLength={254} placeholder="Correo o nombre de usuario" /></label><label>Contraseña<input name="accessPassword" type="password" value={form.accessPassword} onChange={changeForm} autoComplete="new-password" maxLength={500} placeholder={editingId ? "Contraseña guardada o escribe una nueva" : "Contraseña de la cuenta"} /></label></div>
           <label>Proveedor<input name="provider" list="inventory-provider-options" value={form.provider} onChange={changeForm} placeholder="Nombre del proveedor" maxLength={100} required /><datalist id="inventory-provider-options">{supplierSuggestions.map((supplier)=><option key={supplier.name} value={supplier.name}/>)}</datalist></label>
           <label>Fecha de compra<input name="purchaseDate" type="date" value={form.purchaseDate} onChange={changeForm} required /></label>
           <label>Perfiles disponibles<input name="profileCapacity" type="number" min="1" max="20" value={form.profileCapacity} onChange={changeForm} required /><small>Cuántos perfiles puede compartir esta cuenta.</small></label>
