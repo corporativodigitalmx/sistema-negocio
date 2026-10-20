@@ -118,7 +118,7 @@ function App() {
               <Route path="/proveedores" element={<AccessGuard allowed={can("suppliers_view")} fallback={landing}><Proveedores userId={session.user.id} canEdit={can("suppliers_edit")} /></AccessGuard>} />
               <Route path="/inventario" element={<AccessGuard allowed={can("inventory_view")} fallback={landing}><Inventario userId={session.user.id} isSuperadmin={isAdmin} canViewAll={can("inventory_all")} canEdit={can("inventory_edit")} /></AccessGuard>} />
               <Route path="/tareas" element={<AccessGuard allowed={can("tasks_view")} fallback={landing}><Tasks user={session.user} canManage={can("tasks_manage")} /></AccessGuard>} />
-              <Route path="/reportes" element={<AccessGuard allowed={can("reports_view")} fallback={landing}><Reports /></AccessGuard>} />
+              <Route path="/reportes" element={<AccessGuard allowed={can("reports_view")} fallback={landing}><Reports canManageIssues={can("inventory_edit") || can("inventory_all")} canNotifyCustomers={can("clients_view") || can("clients_edit") || can("clients_all")} /></AccessGuard>} />
               <Route path="/soporte" element={<AccessGuard allowed={can("support_view")} fallback={landing}><Support userId={session.user.id} canManage={can("support_manage")} /></AccessGuard>} />
               <Route path="/configuracion" element={<AccessGuard allowed={can("settings_view")} fallback={landing}><Settings user={session.user} /></AccessGuard>} />
               <Route path="/administracion" element={isAdmin ? <Admin /> : <Navigate to={landing} replace />} />

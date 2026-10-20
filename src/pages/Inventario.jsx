@@ -63,7 +63,8 @@ function fromDatabase(row) {
     profileCapacity: row.profile_capacity ?? 5, customers: Array.isArray(row.customers) ? row.customers : [], cost: row.cost ?? "", notes: row.notes || "",
     storePublished: row.store_published ?? false, storeTitle: row.store_title || row.service, storeDescription: row.store_description || "",
     storePublicProfilePrice: row.store_public_profile_price ?? "", storePublicAccountPrice: row.store_public_account_price ?? "",
-    storeResellerProfilePrice: row.store_reseller_profile_price ?? "", storeResellerAccountPrice: row.store_reseller_account_price ?? "" };
+    storeResellerProfilePrice: row.store_reseller_profile_price ?? "", storeResellerAccountPrice: row.store_reseller_account_price ?? "",
+    operationalStatus: row.inventory_operational_status || "available" };
 }
 function toDatabase(row, userId) {
   return { id: row.id, user_id: row.ownerId || userId, service: row.service, account_label: row.accountLabel,
@@ -126,6 +127,11 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   const [batchDefaults, setBatchDefaults] = useState({ service: "Netflix", provider: "", purchaseDate: today(), profileCapacity: "5" });
   const [batchSaving, setBatchSaving] = useState(false);
   const [batchNotice, setBatchNotice] = useState("");
+  const [issueOpen, setIssueOpen] = useState(false);
+  const [issueSearch, setIssueSearch] = useState("");
+  const [issueAccountId, setIssueAccountId] = useState("");
+  const [issueDescription, setIssueDescription] = useState("");
+  const [issueSaving, setIssueSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(blank);
   const [notice, setNotice] = useState("");
@@ -192,6 +198,19 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
 
   function openNew() {
     setEditingId(null); setForm(blank()); setNotice(""); setFormOpen(true);
+  }
+  async function reportIssue(event) {
+    event.preventDefault();
+    if (!issueAccountId || issueDescription.trim().length < 3) return;
+    setIssueSaving(true);
+    const { error } = await supabase.rpc("report_inventory_issue", {
+      p_inventory_account_id: issueAccountId, p_description: issueDescription.trim(),
+    });
+    setIssueSaving(false);
+    if (error) { setNotice(`No se pudo registrar el reporte: ${error.message}`); return; }
+    setAccounts((current) => current.map((row) => row.id === issueAccountId ? { ...row, operationalStatus: "reported" } : row));
+    setIssueOpen(false); setIssueSearch(""); setIssueAccountId(""); setIssueDescription("");
+    setNotice("Problema registrado. La cuenta dejó de estar disponible para nuevas asignaciones y la tienda.");
   }
   function chooseAddMode(mode) {
     setAddChoiceOpen(false);
@@ -345,6 +364,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     <header className="inventory-heading">
       <div><p className="inventory-eyebrow">CONTROL DE SUSCRIPCIONES</p><h1>Inventario de cuentas</h1><p className="inventory-subtitle">Proveedores, vencimientos y clientes en un solo lugar.</p></div>
       <div className="inventory-actions">
+        {canEdit && <button className="inv-button secondary" type="button" onClick={() => { setIssueOpen(true); setIssueSearch(""); setIssueAccountId(""); setIssueDescription(""); }}><AlertTriangle size={17} /> Reportar problema</button>}
         <button className="inv-button secondary" type="button" onClick={exportBackup} disabled={!accounts.length}><Download size={17} /> Respaldo</button>
         <label className="inv-button secondary upload-button"><FileUp size={17} /> Restaurar<input type="file" accept="application/json,.json" onChange={restoreBackup} /></label>
         {canEdit && <button className="inv-button primary" type="button" onClick={() => setAddChoiceOpen(true)}><Plus size={18} /> Agregar cuentas</button>}
@@ -377,7 +397,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
           <tbody>{visible.map((row) => {
             const status = statusFor(row.expirationDate);
             return <tr key={row.id}>
-              <td><div className="inventory-account"><span className="service-mark">{row.service.slice(0, 1)}</span><span><strong>{row.accountLabel}</strong><small>{row.service}</small></span></div></td>
+              <td><div className="inventory-account"><span className="service-mark">{row.service.slice(0, 1)}</span><span><strong>{row.accountLabel}</strong><small>{row.service}{row.operationalStatus === "reported" ? " · Con reporte" : row.operationalStatus === "replaced" ? " · Reemplazada" : ""}</small></span></div></td>
               <td>{row.provider}</td>
               <td><span className={`expiry-pill ${status.key}`}>{status.label}</span><small className="table-date">{dateLabel(row.expirationDate)}</small></td>
               <td>{row.duration} {UNITS[row.unit] || "meses"}</td>
@@ -391,6 +411,19 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
       </div>
       <footer className="inventory-footer"><span>{visible.length} de {accounts.length} cuentas</span><span>Vencimiento calculado desde fecha de compra + duración.</span></footer>
     </section>
+
+    {issueOpen && <div className="inventory-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !issueSaving) setIssueOpen(false); }}>
+      <section className="inventory-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-issue-title">
+        <header className="modal-heading"><div><p className="inventory-eyebrow">INCIDENCIA DE CUENTA</p><h2 id="inventory-issue-title">Reportar un problema</h2></div><button type="button" className="modal-close" aria-label="Cerrar" onClick={() => !issueSaving && setIssueOpen(false)}><X size={20} /></button></header>
+        <form className="inventory-form" onSubmit={reportIssue}>
+          <label className="span-two">Buscar cuenta<input value={issueSearch} onChange={(event) => { setIssueSearch(event.target.value); setIssueAccountId(""); }} placeholder="Servicio, identificador o proveedor" autoFocus /></label>
+          <label className="span-two">Selecciona la cuenta<select value={issueAccountId} onChange={(event) => setIssueAccountId(event.target.value)} required><option value="">Elige una cuenta disponible</option>{rows.filter((row) => row.operationalStatus === "available" && `${row.service} ${row.accountLabel} ${row.provider}`.toLocaleLowerCase("es-MX").includes(issueSearch.trim().toLocaleLowerCase("es-MX"))).map((row) => <option key={row.id} value={row.id}>{row.service} · {row.accountLabel} · {row.provider}</option>)}</select></label>
+          <label className="span-two">¿Qué problema presenta?<textarea value={issueDescription} onChange={(event) => setIssueDescription(event.target.value)} minLength={3} maxLength={1000} rows="4" placeholder="Ej.: contraseña rechazada, cuenta suspendida, perfil sin acceso…" required /></label>
+          <small className="span-two">Al guardar, se retirará de nuevas ventas y de la tienda hasta que se reactive o reemplace.</small>
+          <footer className="form-actions"><button className="inv-button secondary" type="button" onClick={() => setIssueOpen(false)} disabled={issueSaving}>Cancelar</button><button className="inv-button primary" type="submit" disabled={issueSaving || !issueAccountId || issueDescription.trim().length < 3}><AlertTriangle size={17} /> {issueSaving ? "Registrando…" : "Registrar problema"}</button></footer>
+        </form>
+      </section>
+    </div>}
 
     {addChoiceOpen && <div className="inventory-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddChoiceOpen(false); }}>
       <section className="inventory-modal inventory-add-choice" role="dialog" aria-modal="true" aria-labelledby="inventory-add-choice-title">

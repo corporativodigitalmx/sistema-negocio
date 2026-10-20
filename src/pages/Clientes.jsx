@@ -18,6 +18,7 @@ const daysRemaining = (value) => {
   return date ? Math.round((date - dateValue(today())) / 86400000) : null;
 };
 function assignmentStatus(assignment) {
+  if (assignment.assignment_status === "replaced") return { key: "replaced", label: "Reemplazada · historial" };
   const days = daysRemaining(assignment.expires_on);
   if (days === null) return { key: "unknown", label: "Sin fecha" };
   if (days < 0) return { key: "expired", label: "Vencida" };
@@ -53,7 +54,7 @@ export default function Clientes({ userId, canEdit = true }) {
     const [clientsResult, assignmentsResult, accountsResult, availabilityResult] = await Promise.all([
       supabase.from("clients").select("*").order("full_name"),
       supabase.from("client_account_assignments")
-        .select("id,user_id,client_id,inventory_account_id,profile_name,delivery_type,starts_on,duration_days,expires_on,notes,created_at,inventory:inventario_cuentas!client_account_assignments_inventory_account_id_fkey(id,service,account_label,provider,user_id)")
+        .select("id,user_id,client_id,inventory_account_id,profile_name,delivery_type,assignment_status,starts_on,duration_days,expires_on,notes,created_at,inventory:inventario_cuentas!client_account_assignments_inventory_account_id_fkey(id,service,account_label,provider,user_id)")
         .order("created_at", { ascending: false }),
       supabase.from("inventario_cuentas").select("id,service,account_label,provider,user_id").order("service"),
       supabase.from("inventory_account_availability").select("inventory_account_id,profile_capacity,available_profiles,has_full_account,status"),
@@ -78,7 +79,7 @@ export default function Clientes({ userId, canEdit = true }) {
     const history = assignments.filter((assignment) => assignment.client_id === client.id);
     return { ...client, history, soon: history.filter((row) => assignmentStatus(row).key === "soon").length,
       expired: history.filter((row) => assignmentStatus(row).key === "expired").length,
-      active: history.filter((row) => assignmentStatus(row).key === "active" || assignmentStatus(row).key === "soon").length };
+      active: history.filter((row) => row.assignment_status !== "replaced" && (assignmentStatus(row).key === "active" || assignmentStatus(row).key === "soon")).length };
   }), [clients, assignments]);
   const visibleClients = clientRows.filter((client) => {
     const term = `${client.full_name} ${client.phone}`.toLocaleLowerCase("es-MX");
