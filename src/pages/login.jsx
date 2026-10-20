@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, CheckCircle2, LockKeyhole, Mail, UserRound } from "lucide-react";
+import { ArrowRight, CheckCircle2, LockKeyhole, Mail, UserRound, Boxes, Users, CreditCard, ClipboardList, ShoppingBag, Sparkles, ShieldCheck, PackageCheck, Truck, BarChart3, Headphones, Shield, Wallet } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import "./auth.css";
 
@@ -19,6 +19,7 @@ export default function Login({ initialMode = "register", onRecoveryComplete }) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [flyerTab, setFlyerTab] = useState("sistema");
 
   const changeMode = (nextMode) => {
     setMode(nextMode);
@@ -82,12 +83,15 @@ export default function Login({ initialMode = "register", onRecoveryComplete }) 
     <main className="auth-page">
       <div className="auth-glow auth-glow-one" />
       <div className="auth-glow auth-glow-two" />
+      <header className="auth-topbar">
+        <button className={`auth-top-link ${mode === "login" ? "active" : ""}`} type="button" onClick={() => changeMode("login")}>Iniciar sesión <ArrowRight size={15} /></button>
+        <a className="auth-brand" href="/" aria-label="Sistema Negocio, inicio">
+          <span className="auth-brand-mark">CD</span>
+          <span>Corporativo Digital</span>
+        </a>
+      </header>
       <section className="auth-layout" aria-label="Acceso a Sistema Negocio">
         <div className="auth-intro">
-          <a className="auth-brand" href="/" aria-label="Sistema Negocio, inicio">
-            <span className="auth-brand-mark">CD</span>
-            <span>Corporativo Digital</span>
-          </a>
           <div className="auth-intro-copy">
             <span className="auth-kicker">SISTEMA NEGOCIO</span>
             <h1>Todo tu negocio,<br /><span>en un solo lugar.</span></h1>
@@ -146,6 +150,41 @@ export default function Login({ initialMode = "register", onRecoveryComplete }) 
           <p className="auth-legal">Al continuar, aceptas usar este espacio de forma responsable.</p>
         </section>
       </section>
+      <section className="auth-flyer" aria-labelledby="auth-flyer-title">
+        <div className="auth-flyer-heading">
+          <span className="auth-kicker">UNA EXPERIENCIA COMPLETA</span>
+          <h2 id="auth-flyer-title">Administra tu negocio. Encuentra lo que necesitas.</h2>
+          <p>Herramientas de gestión y una tienda en línea, en un mismo espacio.</p>
+        </div>
+        <div className="auth-flyer-tabs" role="tablist" aria-label="Explora Sistema Negocio y la tienda">
+          <button type="button" role="tab" aria-selected={flyerTab === "sistema"} className={flyerTab === "sistema" ? "selected" : ""} onClick={() => setFlyerTab("sistema")}><Boxes size={17} /> El sistema</button>
+          <button type="button" role="tab" aria-selected={flyerTab === "tienda"} className={flyerTab === "tienda" ? "selected" : ""} onClick={() => setFlyerTab("tienda")}><ShoppingBag size={17} /> La tienda en línea</button>
+        </div>
+        {flyerTab === "sistema" ? (
+          <div className="auth-flyer-grid" role="tabpanel">
+            <FlyerCard icon={<Users />} title="Clientes" text="Organiza sus datos, perfiles, asignaciones y renovaciones." />
+            <FlyerCard icon={<Boxes />} title="Inventario y cuentas" text="Controla existencias, disponibilidad y cuentas por vencer." />
+            <FlyerCard icon={<CreditCard />} title="Ventas" text="Registra entregas de perfiles o cuentas completas a tus clientes." />
+            <FlyerCard icon={<Wallet />} title="Pagos" text="Registra pagos y consulta saldos pendientes de cobro." />
+            <FlyerCard icon={<Truck />} title="Proveedores" text="Mantén organizados los proveedores y su información." />
+            <FlyerCard icon={<ClipboardList />} title="Tareas" text="Asigna pendientes al equipo y da seguimiento a su avance." />
+            <FlyerCard icon={<BarChart3 />} title="Reportes" text="Consulta indicadores de ventas, pagos, clientes e inventario." />
+            <FlyerCard icon={<Headphones />} title="Soporte y configuración" text="Gestiona solicitudes de ayuda y actualiza tu perfil." />
+            <FlyerCard icon={<Shield />} title="Administración" text="Administra usuarios y permisos de acceso a los módulos." />
+          </div>
+        ) : (
+          <div className="auth-store-panel" role="tabpanel">
+            <span className="auth-store-icon"><ShoppingBag size={25} /></span>
+            <div><h3>Explora nuestra tienda en línea</h3><p>Descubre el catálogo de servicios digitales y las opciones disponibles. Consulta los detalles de cada opción antes de elegir.</p></div>
+            <span className="auth-store-note"><Sparkles size={16} /> Catálogo digital</span>
+          </div>
+        )}
+        <div className="auth-flyer-footer"><span><ShieldCheck size={16} /> Gestión organizada y acceso por usuario</span><span><PackageCheck size={16} /> Todo a tu ritmo, desde cualquier dispositivo</span></div>
+      </section>
     </main>
   );
+}
+
+function FlyerCard({ icon, title, text }) {
+  return <article className="auth-flyer-card"><span>{icon}</span><h3>{title}</h3><p>{text}</p></article>;
 }
