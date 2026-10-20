@@ -63,3 +63,20 @@ create policy clients_accounts_read on public.clients for select to authenticate
 
 drop policy if exists clients_sales_read on public.clients;
 create policy clients_sales_read on public.clients for select to authenticated using(user_id=auth.uid() and public.has_permission('sales_edit'));
+create table if not exists public.support_tickets (
+  id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade,
+  subject text not null check(char_length(trim(subject)) between 4 and 140), category text not null default 'general' check(category in ('general','access','inventory','billing','other')),
+  message text not null check(char_length(trim(message)) between 10 and 4000), status text not null default 'open' check(status in ('open','in_progress','resolved')),
+  response text not null default '', created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create index if not exists support_tickets_user_idx on public.support_tickets(user_id,created_at desc);
+alter table public.support_tickets enable row level security; revoke all on public.support_tickets from anon; grant select,insert,update on public.support_tickets to authenticated;
+drop policy if exists support_tickets_read on public.support_tickets; create policy support_tickets_read on public.support_tickets for select to authenticated using(user_id=auth.uid() or public.has_permission('support_manage'));
+drop policy if exists support_tickets_create on public.support_tickets; create policy support_tickets_create on public.support_tickets for insert to authenticated with check(user_id=auth.uid() and public.has_permission('support_view'));
+drop policy if exists support_tickets_manage on public.support_tickets; create policy support_tickets_manage on public.support_tickets for update to authenticated using(public.has_permission('support_manage')) with check(public.has_permission('support_manage'));
+drop policy if exists reports_clients_read on public.clients; create policy reports_clients_read on public.clients for select to authenticated using(user_id=auth.uid() and public.has_permission('reports_view'));
+drop policy if exists reports_inventory_read on public.inventario_cuentas; create policy reports_inventory_read on public.inventario_cuentas for select to authenticated using(user_id=auth.uid() and public.has_permission('reports_view'));
+drop policy if exists reports_assignments_read on public.client_account_assignments; create policy reports_assignments_read on public.client_account_assignments for select to authenticated using(user_id=auth.uid() and public.has_permission('reports_view'));
+drop policy if exists reports_sales_read on public.sales; create policy reports_sales_read on public.sales for select to authenticated using(user_id=auth.uid() and public.has_permission('reports_view'));
+drop policy if exists reports_payments_read on public.payments; create policy reports_payments_read on public.payments for select to authenticated using(user_id=auth.uid() and public.has_permission('reports_view'));
+drop policy if exists reports_suppliers_read on public.suppliers; create policy reports_suppliers_read on public.suppliers for select to authenticated using(user_id=auth.uid() and public.has_permission('reports_view'));
