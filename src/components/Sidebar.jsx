@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, Users, CreditCard, ShoppingCart, Wallet, Truck, Boxes, BarChart3, Settings, Headphones, ClipboardList, ShieldCheck } from "lucide-react";
 import "./Sidebar.css";
-export default function Sidebar({access}) { const admin=access?.role==="superadmin"; const can=key=>admin||Boolean(access?.permissions?.[key]); return <div className="sidebar"><div className="logo"><h2>CD</h2><p>Corporativo Digital MX</p></div><nav className="menu">
+export default function Sidebar({access}) { const admin=access?.role==="superadmin"; const can=key=>admin||Boolean(access?.permissions?.[key]||(key==="clients_view"&&(access?.permissions?.clients_edit||access?.permissions?.clients_all))||(key==="inventory_view"&&access?.permissions?.inventory_all)||(key==="tasks_view"&&access?.permissions?.tasks_manage)); return <div className="sidebar"><div className="logo"><h2>CD</h2><p>Corporativo Digital MX</p></div><nav className="menu">
 {can("dashboard_view")&&<NavItem to="/" icon={<LayoutDashboard/>} label="Dashboard"/>}
 {can("clients_view")&&<NavItem to="/clientes" icon={<Users/>} label="Clientes"/>}
 {can("accounts_view")&&<NavItem to="/cuentas" icon={<CreditCard/>} label="Cuentas"/>}

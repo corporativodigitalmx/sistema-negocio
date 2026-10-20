@@ -84,7 +84,7 @@ function App() {
   if (accessLoading || (!access && !accessError)) return <div style={styles.loading}><p>Preparando permisos…</p></div>;
   if (accessError) return <div style={styles.loading}><section><p>No se pudo cargar tu perfil de acceso: {accessError}</p><button onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></section></div>;
   const isAdmin = access?.role === "superadmin";
-  const can = (key) => isAdmin || Boolean(access?.permissions?.[key]);
+  const can = (key) => isAdmin || Boolean(access?.permissions?.[key] || (key === "clients_view" && (access?.permissions?.clients_edit || access?.permissions?.clients_all)) || (key === "inventory_view" && access?.permissions?.inventory_all) || (key === "tasks_view" && access?.permissions?.tasks_manage));
   const landing = can("dashboard_view") ? "/" : can("inventory_view") ? "/inventario" : can("tasks_view") ? "/tareas" : "/sin-acceso";
 
   // 🚀 APP PRINCIPAL
@@ -105,7 +105,7 @@ function App() {
           <div style={styles.content}>
             <Routes>
               <Route path="/" element={<AccessGuard allowed={can("dashboard_view")} fallback={landing}><Dashboard /></AccessGuard>} />
-              <Route path="/clientes" element={<AccessGuard allowed={can("clients_view")} fallback={landing}><Clientes /></AccessGuard>} />
+              <Route path="/clientes" element={<AccessGuard allowed={can("clients_view")} fallback={landing}><Clientes userId={session.user.id} canEdit={can("clients_edit")} /></AccessGuard>} />
               <Route path="/cuentas" element={<AccessGuard allowed={can("accounts_view")} fallback={landing}><Cuentas /></AccessGuard>} />
               <Route path="/ventas" element={<AccessGuard allowed={can("sales_view")} fallback={landing}><Ventas /></AccessGuard>} />
               <Route path="/pagos" element={<AccessGuard allowed={can("payments_view")} fallback={landing}><Pagos /></AccessGuard>} />

@@ -63,15 +63,15 @@ function fromDatabase(row) {
     customers: Array.isArray(row.customers) ? row.customers : [], cost: row.cost ?? "", notes: row.notes || "" };
 }
 function toDatabase(row, userId) {
-  return { id: row.id, user_id: userId, service: row.service, account_label: row.accountLabel,
+  return { id: row.id, user_id: row.ownerId || userId, service: row.service, account_label: row.accountLabel,
     provider: row.provider, purchase_date: row.purchaseDate, duration: row.duration,
     unit: row.unit, customers: row.customers, cost: row.cost === "" ? null : row.cost, notes: row.notes };
 }
 function blank() {
-  return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "1", unit: "months", customers: "", cost: "", notes: "" };
+  return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", customers: "", cost: "", notes: "" };
 }
 function formFrom(row) {
-  return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: String(row.duration), unit: row.unit, customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "" };
+  return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: "28", unit: "days", customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "" };
 }
 
 export default function Inventario({ userId, isSuperadmin = false, canEdit = true }) {
@@ -165,7 +165,7 @@ export default function Inventario({ userId, isSuperadmin = false, canEdit = tru
     }
     const row = {
       id: editingId || id(), service: form.service, accountLabel: form.accountLabel.trim(),
-      provider: form.provider.trim(), purchaseDate: form.purchaseDate, duration, unit: form.unit,
+      provider: form.provider.trim(), purchaseDate: form.purchaseDate, duration: 28, unit: "days",
       customers: form.customers.split(/[,\n]/).map((name) => name.trim()).filter(Boolean),
       cost: form.cost === "" ? "" : Number(form.cost), notes: form.notes.trim(),
     };
@@ -284,7 +284,7 @@ export default function Inventario({ userId, isSuperadmin = false, canEdit = tru
           <label className="span-two">Identificador de cuenta<input name="accountLabel" value={form.accountLabel} onChange={changeForm} placeholder="Correo o etiqueta, sin contraseña" maxLength={120} required /></label>
           <label>Proveedor<input name="provider" value={form.provider} onChange={changeForm} placeholder="Nombre del proveedor" maxLength={100} required /></label>
           <label>Fecha de compra<input name="purchaseDate" type="date" value={form.purchaseDate} onChange={changeForm} required /></label>
-          <label>Duración comprada<span className="duration-fields"><input name="duration" type="number" min="1" step="1" value={form.duration} onChange={changeForm} required /><select name="unit" value={form.unit} onChange={changeForm} aria-label="Unidad">{Object.entries(UNITS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></span></label>
+          <label>Duración del ciclo<input value="28 días" readOnly /></label>
           <label>Vencimiento calculado<input value={dateLabel(expiration(form.purchaseDate, form.duration, form.unit))} readOnly /></label>
           <label className="span-two">Cliente o clientes<textarea name="customers" value={form.customers} onChange={changeForm} placeholder="Nombres separados por coma; déjalo vacío si aún está libre." rows="2" maxLength={500} /></label>
           <label>Costo de compra (opcional)<span className="currency-field"><b>$</b><input name="cost" type="number" min="0" step="0.01" value={form.cost} onChange={changeForm} placeholder="0.00" /></span></label>
