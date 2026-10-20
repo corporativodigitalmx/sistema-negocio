@@ -1,3 +1,2 @@
-export default function Ventas() {
-  return <h1 style={{ color: "white" }}>Ventas</h1>;
-}
+import { Sales } from "./OperationalModules";
+export default Sales;

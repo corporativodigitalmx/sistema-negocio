@@ -84,8 +84,8 @@ function App() {
   if (accessLoading || (!access && !accessError)) return <div style={styles.loading}><p>Preparando permisos…</p></div>;
   if (accessError) return <div style={styles.loading}><section><p>No se pudo cargar tu perfil de acceso: {accessError}</p><button onClick={() => supabase.auth.signOut()}>Cerrar sesión</button></section></div>;
   const isAdmin = access?.role === "superadmin";
-  const can = (key) => isAdmin || Boolean(access?.permissions?.[key] || (key === "clients_view" && (access?.permissions?.clients_edit || access?.permissions?.clients_all)) || (key === "inventory_view" && access?.permissions?.inventory_all) || (key === "tasks_view" && access?.permissions?.tasks_manage));
-  const landing = can("dashboard_view") ? "/" : can("inventory_view") ? "/inventario" : can("tasks_view") ? "/tareas" : "/sin-acceso";
+  const can = (key) => isAdmin || Boolean(access?.permissions?.[key] || (key === "clients_view" && (access?.permissions?.clients_edit || access?.permissions?.clients_all)) || (key === "inventory_view" && access?.permissions?.inventory_all) || (key === "tasks_view" && access?.permissions?.tasks_manage) || (key === "accounts_view" && access?.permissions?.accounts_edit) || (key === "sales_view" && access?.permissions?.sales_edit) || (key === "payments_view" && access?.permissions?.payments_edit) || (key === "suppliers_view" && access?.permissions?.suppliers_edit));
+  const landing = can("dashboard_view") ? "/" : can("inventory_view") ? "/inventario" : can("clients_view") ? "/clientes" : can("accounts_view") ? "/cuentas" : can("sales_view") ? "/ventas" : can("payments_view") ? "/pagos" : can("suppliers_view") ? "/proveedores" : can("tasks_view") ? "/tareas" : "/sin-acceso";
 
   // 🚀 APP PRINCIPAL
   return (
@@ -104,13 +104,13 @@ function App() {
           {/* RUTAS */}
           <div style={styles.content}>
             <Routes>
-              <Route path="/" element={<AccessGuard allowed={can("dashboard_view")} fallback={landing}><Dashboard /></AccessGuard>} />
+              <Route path="/" element={<AccessGuard allowed={can("dashboard_view")} fallback={landing}><Dashboard user={session.user} /></AccessGuard>} />
               <Route path="/clientes" element={<AccessGuard allowed={can("clients_view")} fallback={landing}><Clientes userId={session.user.id} canEdit={can("clients_edit")} /></AccessGuard>} />
-              <Route path="/cuentas" element={<AccessGuard allowed={can("accounts_view")} fallback={landing}><Cuentas /></AccessGuard>} />
-              <Route path="/ventas" element={<AccessGuard allowed={can("sales_view")} fallback={landing}><Ventas /></AccessGuard>} />
-              <Route path="/pagos" element={<AccessGuard allowed={can("payments_view")} fallback={landing}><Pagos /></AccessGuard>} />
-              <Route path="/proveedores" element={<AccessGuard allowed={can("suppliers_view")} fallback={landing}><Proveedores /></AccessGuard>} />
-              <Route path="/inventario" element={<AccessGuard allowed={can("inventory_view")} fallback={landing}><Inventario userId={session.user.id} isSuperadmin={isAdmin} canEdit={can("inventory_edit")} /></AccessGuard>} />
+              <Route path="/cuentas" element={<AccessGuard allowed={can("accounts_view")} fallback={landing}><Cuentas canEdit={can("inventory_edit")} /></AccessGuard>} />
+              <Route path="/ventas" element={<AccessGuard allowed={can("sales_view")} fallback={landing}><Ventas userId={session.user.id} canEdit={can("sales_edit")} /></AccessGuard>} />
+              <Route path="/pagos" element={<AccessGuard allowed={can("payments_view")} fallback={landing}><Pagos userId={session.user.id} canEdit={can("payments_edit")} /></AccessGuard>} />
+              <Route path="/proveedores" element={<AccessGuard allowed={can("suppliers_view")} fallback={landing}><Proveedores userId={session.user.id} canEdit={can("suppliers_edit")} /></AccessGuard>} />
+              <Route path="/inventario" element={<AccessGuard allowed={can("inventory_view")} fallback={landing}><Inventario userId={session.user.id} isSuperadmin={isAdmin} canViewAll={can("inventory_all")} canEdit={can("inventory_edit")} /></AccessGuard>} />
               <Route path="/tareas" element={<AccessGuard allowed={can("tasks_view")} fallback={landing}><Tasks user={session.user} canManage={can("tasks_manage")} /></AccessGuard>} />
               <Route path="/administracion" element={isAdmin ? <Admin /> : <Navigate to={landing} replace />} />
               <Route path="/sin-acceso" element={<div style={{color:"white"}}><h1>Sin módulos asignados</h1><p>Solicita al administrador que habilite tu acceso.</p></div>} />

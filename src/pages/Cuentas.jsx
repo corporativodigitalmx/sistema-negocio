@@ -1,3 +1,2 @@
-export default function Cuentas() {
-  return <h1 style={{ color: "white" }}>Cuentas</h1>;
-}
+import { Accounts } from "./OperationalModules";
+export default Accounts;

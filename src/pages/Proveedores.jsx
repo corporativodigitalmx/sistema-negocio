@@ -1,3 +1,2 @@
-export default function Proveedores() {
-  return <h1 style={{ color: "white" }}>Proveedores</h1>;
-}
+import { Suppliers } from "./OperationalModules";
+export default Suppliers;

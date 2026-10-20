@@ -1,198 +1,23 @@
-import StatCard from "../components/StatCard";
-import {
-  DollarSign,
-  Users,
-  UserPlus,
-  AlertTriangle,
-  CreditCard
-} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { AlertTriangle, ArrowDownLeft, ArrowUpRight, RefreshCw, Users, CreditCard, Boxes, CircleDollarSign } from "lucide-react";
+import { Link } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
+import "./Operational.css";
 
-import "./Dashboard.css";
-
-export default function Dashboard() {
-  return (
-    <div className="dashboard">
-
-      {/* HEADER */}
-      <div className="header">
-        <div>
-          <h1>¡Hola, David! 👋</h1>
-          <p>Resumen general de tu sistema</p>
-        </div>
-
-        <div className="date-box">
-          Hoy
-        </div>
-      </div>
-
-      {/* 🔥 CARDS PRO */}
-      <div className="cards">
-
-        <StatCard
-          title="Ventas del día"
-          value="8"
-          change="+12%"
-          positive={true}
-          icon={<CreditCard size={18} />}
-        />
-
-        <StatCard
-          title="Ganancias"
-          value="$2,450"
-          change="+18%"
-          positive={true}
-          icon={<DollarSign size={18} />}
-        />
-
-        <StatCard
-          title="Clientes nuevos"
-          value="3"
-          change="+5%"
-          positive={true}
-          icon={<UserPlus size={18} />}
-        />
-
-        <StatCard
-          title="Clientes frecuentes"
-          value="18"
-          change="+10%"
-          positive={true}
-          icon={<Users size={18} />}
-        />
-
-        <StatCard
-          title="Morosos"
-          value="5"
-          change="-2%"
-          positive={false}
-          icon={<AlertTriangle size={18} />}
-        />
-
-      </div>
-
-      {/* 📊 GRAFICAS */}
-      <div className="charts">
-
-        <div className="chart-box">
-          <h3>Ventas de la semana</h3>
-          <div className="fake-chart">📊</div>
-        </div>
-
-        <div className="chart-box">
-          <h3>Ganancias</h3>
-          <div className="fake-chart">📈</div>
-        </div>
-
-        <div className="chart-box">
-          <h3>Cuentas activas</h3>
-          <div className="fake-chart">🎯</div>
-        </div>
-
-      </div>
-
-      {/* 📱 APPS STREAMING */}
-      <div className="apps">
-        <AppCard name="Netflix" count="98 cuentas" />
-        <AppCard name="Disney+" count="64 cuentas" />
-        <AppCard name="Max" count="52 cuentas" />
-        <AppCard name="Prime Video" count="40 cuentas" />
-        <AppCard name="VIX" count="32 cuentas" />
-        <AppCard name="Crunchyroll" count="26 cuentas" />
-        <AppCard name="Spotify" count="18 cuentas" />
-      </div>
-
-      {/* 📋 TABLAS */}
-      <div className="tables">
-
-        {/* VENTAS */}
-        <div className="table-box">
-          <h3>Últimas ventas</h3>
-
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Cliente</th>
-                <th>Servicio</th>
-                <th>Monto</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              <tr>
-                <td>#1042</td>
-                <td>Ana López</td>
-                <td>Netflix</td>
-                <td>$40</td>
-                <td className="ok">Pagado</td>
-              </tr>
-
-              <tr>
-                <td>#1043</td>
-                <td>Carlos Ruiz</td>
-                <td>Disney+</td>
-                <td>$16</td>
-                <td className="pending">Pendiente</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* VENCIMIENTOS */}
-        <div className="table-box">
-          <h3>Cuentas por vencer</h3>
-
-          <table>
-            <tbody>
-              <tr>
-                <td>Netflix</td>
-                <td>05 Oct</td>
-                <td className="danger">1 día</td>
-              </tr>
-
-              <tr>
-                <td>Spotify</td>
-                <td>06 Oct</td>
-                <td className="warning">2 días</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {/* PROVEEDORES */}
-        <div className="table-box">
-          <h3>Pagos a proveedores</h3>
-
-          <table>
-            <tbody>
-              <tr>
-                <td>Netflix LAT</td>
-                <td>$1,900</td>
-                <td className="danger">Pendiente</td>
-              </tr>
-
-              <tr>
-                <td>Disney Distribuidor</td>
-                <td>$1,200</td>
-                <td className="ok">Pagado</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-      </div>
-
-    </div>
-  );
+const money = (n) => new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(n || 0));
+const dateOnly = (offset=0) => { const d=new Date();d.setDate(d.getDate()+offset);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+export default function Dashboard({ user }) {
+  const [loading,setLoading]=useState(true),[error,setError]=useState(""),[data,setData]=useState({clients:[],accounts:[],sales:[],payments:[]});
+  const refresh=useCallback(async()=>{setLoading(true);const [c,a,s,p]=await Promise.all([supabase.from("clients").select("id,full_name,created_at"),supabase.from("inventario_cuentas").select("id,service,account_label,purchase_date,customers,provider"),supabase.from("sales").select("id,client_name,service,amount,status,sale_date").order("sale_date",{ascending:false}),supabase.from("payments").select("id,amount,paid_at,sale_id")]);const failed=[c,a,s,p].find(x=>x.error);if(failed)setError(failed.error.message);else{setError("");setData({clients:c.data||[],accounts:a.data||[],sales:s.data||[],payments:p.data||[]});}setLoading(false);},[]);
+  useEffect(()=>{queueMicrotask(()=>void refresh());},[refresh]);
+  const today=dateOnly(),todaySales=data.sales.filter(s=>s.sale_date===today&&s.status!=="cancelled").reduce((a,s)=>a+Number(s.amount),0),paidBySale=new Map(data.payments.reduce((acc,p)=>{acc.set(p.sale_id,(acc.get(p.sale_id)||0)+Number(p.amount));return acc;},new Map())),outstanding=data.sales.filter(s=>s.status==="pending").reduce((a,s)=>a+Math.max(0,Number(s.amount)-(paidBySale.get(s.id)||0)),0),totalPaid=data.payments.reduce((a,p)=>a+Number(p.amount),0);
+  const expiring=data.accounts.map(a=>{const d=new Date(`${a.purchase_date}T12:00:00`);d.setDate(d.getDate()+28);return {...a,expires:d.toISOString().slice(0,10)};}).filter(a=>a.expires>=today&&a.expires<=dateOnly(7)).sort((a,b)=>a.expires.localeCompare(b.expires));
+  const title=user?.user_metadata?.full_name||user?.email?.split("@")[0]||"tu cuenta";
+  return <main className="op-page dashboard-live"><header className="op-heading"><div><p className="op-eyebrow">RESUMEN DEL NEGOCIO</p><h1>Hola, {title}</h1><p>{new Date().toLocaleDateString("es-MX",{weekday:"long",day:"numeric",month:"long",year:"numeric"})} · Actividad del sistema</p></div><button type="button" className="op-button secondary" onClick={()=>void refresh()} disabled={loading}><RefreshCw size={16}/> {loading?"Actualizando…":"Actualizar"}</button></header>{error&&<p className="op-notice error">No se pudieron cargar todos los indicadores: {error}</p>}
+    <div className="op-stats"><Metric icon={<CircleDollarSign/>} label="Ventas de hoy" value={loading?"…":money(todaySales)} tone="green"/><Metric icon={<Users/>} label="Clientes" value={loading?"…":data.clients.length}/><Metric icon={<AlertTriangle/>} label="Por cobrar" value={loading?"…":money(outstanding)} tone="amber"/><Metric icon={<CreditCard/>} label="Cuentas" value={loading?"…":data.accounts.length}/><Metric icon={<ArrowDownLeft/>} label="Pagos registrados" value={loading?"…":money(totalPaid)} tone="blue"/></div>
+    <div className="op-dashboard-grid"><section className="op-table-card"><header><h2>Ventas recientes</h2><Link to="/ventas">Ver ventas <ArrowUpRight size={14}/></Link></header>{loading?<p className="op-empty">Cargando…</p>:data.sales.length?<div className="op-table-wrap"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Servicio</th><th>Importe</th><th>Estado</th></tr></thead><tbody>{data.sales.map(s=><tr key={s.id}><td>{new Date(`${s.sale_date}T12:00:00`).toLocaleDateString("es-MX")}</td><td>{s.client_name}</td><td>{s.service}</td><td>{money(s.amount)}</td><td><Status value={s.status}/></td></tr>)}</tbody></table></div>:<p className="op-empty">Todavía no hay ventas registradas. <Link to="/ventas">Registrar una venta</Link></p>}</section><section className="op-table-card"><header><h2>Cuentas por vencer</h2><Link to="/cuentas">Ver cuentas <ArrowUpRight size={14}/></Link></header>{loading?<p className="op-empty">Cargando…</p>:expiring.length?<div className="op-table-wrap"><table><thead><tr><th>Servicio</th><th>Cuenta</th><th>Vencimiento</th></tr></thead><tbody>{expiring.map(r=><tr key={r.id}><td>{r.service}</td><td>{r.account_label}</td><td>{new Date(`${r.expires}T12:00:00`).toLocaleDateString("es-MX")}</td></tr>)}</tbody></table></div>:<p className="op-empty">No hay cuentas por vencer en los próximos 7 días.</p>}</section></div>
+    <div className="op-quick-links"><Link to="/clientes"><Users/> Clientes</Link><Link to="/inventario"><Boxes/> Inventario</Link><Link to="/ventas"><ArrowUpRight/> Registrar ventas</Link><Link to="/pagos"><CreditCard/> Capturar pagos</Link></div>
+  </main>;
 }
-
-/* COMPONENTE APP */
-function AppCard({ name, count }) {
-  return (
-    <div className="app-card">
-      <h4>{name}</h4>
-      <p>{count}</p>
-    </div>
-  );
-}
+function Metric({icon,label,value,tone="blue"}){return <article className={`op-metric ${tone}`}><span>{icon}</span><div><small>{label}</small><strong>{value}</strong></div></article>}
+function Status({value}){return <span className={`op-status ${value}`}>{({pending:"Por cobrar",paid:"Pagada",cancelled:"Cancelada"})[value]||value}</span>}

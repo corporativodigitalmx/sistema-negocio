@@ -1,3 +1,2 @@
-export default function Pagos() {
-  return <h1 style={{ color: "white" }}>Pagos</h1>;
-}
+import { Payments } from "./OperationalModules";
+export default Payments;

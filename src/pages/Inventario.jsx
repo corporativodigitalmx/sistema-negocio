@@ -64,8 +64,8 @@ function fromDatabase(row) {
 }
 function toDatabase(row, userId) {
   return { id: row.id, user_id: row.ownerId || userId, service: row.service, account_label: row.accountLabel,
-    provider: row.provider, purchase_date: row.purchaseDate, duration: row.duration,
-    unit: row.unit, customers: row.customers, cost: row.cost === "" ? null : row.cost, notes: row.notes };
+    provider: row.provider, purchase_date: row.purchaseDate, duration: 28,
+    unit: "days", customers: row.customers, cost: row.cost === "" ? null : row.cost, notes: row.notes };
 }
 function blank() {
   return { service: "Netflix", accountLabel: "", provider: "", purchaseDate: today(), duration: "28", unit: "days", customers: "", cost: "", notes: "" };
@@ -74,7 +74,7 @@ function formFrom(row) {
   return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: "28", unit: "days", customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "" };
 }
 
-export default function Inventario({ userId, isSuperadmin = false, canEdit = true }) {
+export default function Inventario({ userId, isSuperadmin = false, canViewAll = isSuperadmin, canEdit = true }) {
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -86,12 +86,13 @@ export default function Inventario({ userId, isSuperadmin = false, canEdit = tru
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(blank);
   const [notice, setNotice] = useState("");
+  const [supplierSuggestions, setSupplierSuggestions] = useState([]);
   useEffect(() => {
     let active = true;
     async function loadFromSupabase() {
       setLoading(true);
       let request = supabase.from(TABLE).select("*");
-      if (!isSuperadmin) request = request.eq("user_id", userId);
+      if (!canViewAll) request = request.eq("user_id", userId);
       const { data, error } = await request.order("created_at", { ascending: false });
       if (!active) return;
       if (error) {
@@ -122,7 +123,9 @@ export default function Inventario({ userId, isSuperadmin = false, canEdit = tru
     }
     if (userId) loadFromSupabase();
     return () => { active = false; };
-  }, [userId, isSuperadmin]);
+  }, [userId, canViewAll]);
+
+  useEffect(() => { let active = true; if (canEdit) supabase.from("suppliers").select("name").eq("active", true).order("name").then(({ data }) => { if (active) setSupplierSuggestions(data || []); }); return () => { active = false; }; }, [canEdit]);
 
   const rows = useMemo(() => accounts
     .map((row) => ({ ...row, expirationDate: expiration(row.purchaseDate, row.duration, row.unit) }))
@@ -282,7 +285,7 @@ export default function Inventario({ userId, isSuperadmin = false, canEdit = tru
         <form className="inventory-form" onSubmit={save}>
           <label>Servicio<select name="service" value={form.service} onChange={changeForm}>{SERVICES.map((item) => <option key={item}>{item}</option>)}</select></label>
           <label className="span-two">Identificador de cuenta<input name="accountLabel" value={form.accountLabel} onChange={changeForm} placeholder="Correo o etiqueta, sin contraseña" maxLength={120} required /></label>
-          <label>Proveedor<input name="provider" value={form.provider} onChange={changeForm} placeholder="Nombre del proveedor" maxLength={100} required /></label>
+          <label>Proveedor<input name="provider" list="inventory-provider-options" value={form.provider} onChange={changeForm} placeholder="Nombre del proveedor" maxLength={100} required /><datalist id="inventory-provider-options">{supplierSuggestions.map((supplier)=><option key={supplier.name} value={supplier.name}/>)}</datalist></label>
           <label>Fecha de compra<input name="purchaseDate" type="date" value={form.purchaseDate} onChange={changeForm} required /></label>
           <label>Duración del ciclo<input value="28 días" readOnly /></label>
           <label>Vencimiento calculado<input value={dateLabel(expiration(form.purchaseDate, form.duration, form.unit))} readOnly /></label>
