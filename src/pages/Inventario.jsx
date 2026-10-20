@@ -63,6 +63,9 @@ function generateAccountIdentifier(service, recordId = id()) {
   return `${prefix}-${suffix}`;
 }
 function validEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value); }
+function accountKey(service, email) {
+  return `${String(service || "").trim().toLocaleLowerCase("es-MX")}\u0000${String(email || "").trim().toLocaleLowerCase("es-MX")}`;
+}
 function fromDatabase(row) {
   return { id: row.id, ownerId: row.user_id, service: row.service, accountLabel: row.account_label, provider: row.provider,
     purchaseDate: row.purchase_date, duration: row.duration, unit: row.unit,
@@ -96,12 +99,22 @@ function parseInventoryBatch(value, defaults) {
   if (!Number.isInteger(sharedCapacity) || sharedCapacity < 1 || sharedCapacity > 20) return { error: "La capacidad debe ser de 1 a 20 perfiles." };
   const rows = [];
   for (const [index, line] of lines.entries()) {
-    const fields = line.split(line.includes("|") ? "|" : "\t").map((field) => field.trim());
-    if (fields.length < 2 || fields.length > 3) return { error: `Línea ${index + 1}: usa correo | contraseña, o servicio | correo | contraseña.` };
-    const [firstField, secondField, thirdField] = fields;
-    const service = fields.length === 3 ? firstField : defaults.service;
-    const accessUsername = (fields.length === 3 ? secondField : firstField).trim();
-    const accessPassword = fields.length === 3 ? thirdField : secondField;
+    // Split only the identity columns. Everything after the email belongs to
+    // the password, so repeated passwords (and passwords containing '|') are
+    // never interpreted as duplicate account identifiers or extra columns.
+    const delimiter = line.includes("|") ? "|" : "\t";
+    const firstSeparator = line.indexOf(delimiter);
+    const secondSeparator = line.indexOf(delimiter, firstSeparator + delimiter.length);
+    if (firstSeparator < 0) return { error: `Línea ${index + 1}: usa correo | contraseña, o servicio | correo | contraseña.` };
+    const firstField = line.slice(0, firstSeparator).trim();
+    const secondField = (secondSeparator < 0
+      ? line.slice(firstSeparator + delimiter.length)
+      : line.slice(firstSeparator + delimiter.length, secondSeparator)).trim();
+    const service = secondSeparator < 0 ? defaults.service : firstField;
+    const accessUsername = secondSeparator < 0 ? firstField : secondField;
+    const accessPassword = (secondSeparator < 0
+      ? line.slice(firstSeparator + delimiter.length)
+      : line.slice(secondSeparator + delimiter.length)).trim();
     const recordId = id();
     const row = {
       id: recordId,
@@ -118,8 +131,8 @@ function parseInventoryBatch(value, defaults) {
     if (!row.accessPassword || row.accessPassword.length > 500) return { error: `Línea ${index + 1}: agrega una contraseña de hasta 500 caracteres.` };
     if (!row.provider) return { error: "Indica el proveedor general del lote." };
     if (row.provider.length > 100) return { error: `Línea ${index + 1}: revisa el largo del proveedor.` };
-    const duplicate = rows.some((item) => item.service.toLocaleLowerCase("es-MX") === row.service.toLocaleLowerCase("es-MX") && item.accessUsername.toLocaleLowerCase("es-MX") === row.accessUsername.toLocaleLowerCase("es-MX"));
-    if (duplicate) return { error: `Línea ${index + 1}: este correo ya aparece para esa plataforma en el lote.` };
+    const duplicate = rows.some((item) => accountKey(item.service, item.accessUsername) === accountKey(row.service, row.accessUsername));
+    if (duplicate) return { error: `Línea ${index + 1}: esta misma combinación de plataforma y correo ya aparece en el lote. Puedes repetir una contraseña si el correo de la cuenta es distinto.` };
     if (!Number.isInteger(row.profileCapacity) || row.profileCapacity < 1 || row.profileCapacity > 20) return { error: "La capacidad debe ser de 1 a 20 perfiles." };
     const date = parseDate(row.purchaseDate);
     if (!date || date.toISOString().slice(0, 10) !== row.purchaseDate) return { error: `Línea ${index + 1}: fecha inválida; usa AAAA-MM-DD.` };
@@ -493,7 +506,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
           <div className="inventory-batch-input span-two">
             <div className="inventory-batch-input-heading"><label htmlFor="inventory-batch-list">Lista de cuentas</label><button className="inv-button secondary" type="button" onClick={pasteBatchFromClipboard}><ClipboardPaste size={16} /> Pegar portapapeles</button></div>
             <textarea id="inventory-batch-list" value={batchText} onChange={(event) => { setBatchText(event.target.value); setBatchNotice(""); }} rows="8" placeholder={"Una cuenta por línea:\ncorreo1@email.com | contraseña1\ncorreo2@email.com | contraseña2\n\nO especifica servicio: Max | correo@email.com | contraseña"} required />
-            <small>{batchText.split(/\r?\n/).filter((line) => line.trim()).length} / 10 cuentas. Las líneas vacías se ignoran.</small>
+            <small>{batchText.split(/\r?\n/).filter((line) => line.trim()).length} / 10 cuentas. Las líneas vacías se ignoran. Puedes repetir contraseñas: el sistema distingue las cuentas por plataforma y correo.</small>
           </div>
           {batchNotice && <p className="form-notice span-two" role="status">{batchNotice}</p>}
           <footer className="form-actions"><button className="inv-button secondary" type="button" onClick={() => setBatchOpen(false)} disabled={batchSaving}>Cancelar</button><button className="inv-button primary" type="submit" disabled={batchSaving || !batchText.trim()}><Check size={17} /> {batchSaving ? "Guardando lote…" : "Agregar cuentas al inventario"}</button></footer>
