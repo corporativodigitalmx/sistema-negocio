@@ -487,6 +487,29 @@ body {
   color: #ff9393;
 }
 
+.row-actions .assign-account-button {
+  border-color: rgba(14, 165, 233, .3);
+  background: rgba(14, 165, 233, .1);
+  color: #79dcff;
+}
+
+.row-actions .assign-account-button:hover {
+  border-color: rgba(14, 165, 233, .65);
+  background: rgba(14, 165, 233, .18);
+}
+
+.assignment-account-summary {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #263d56;
+  border-radius: 9px;
+  background: #101e30;
+}
+
+.assignment-account-summary strong { color: #f1f7fc; font-size: 14px; }
+.assignment-account-summary span { color: #91a2b8; font-size: 12px; }
+
 .inventory-empty {
   display: flex;
   min-height: 260px;

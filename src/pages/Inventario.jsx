@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Boxes, CalendarDays, Check, ClipboardPaste, Download, FileUp, Plus, Search, Trash2, UserRound, X } from "lucide-react";
+import { AlertTriangle, Boxes, CalendarDays, Check, ClipboardPaste, Download, FileUp, Plus, Search, Trash2, UserRound, UserPlus, X } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import "./Inventario.css";
 
@@ -162,6 +162,17 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   const [issueAccountId, setIssueAccountId] = useState("");
   const [issueDescription, setIssueDescription] = useState("");
   const [issueSaving, setIssueSaving] = useState(false);
+  const [assignmentOpen, setAssignmentOpen] = useState(false);
+  const [assignmentAccount, setAssignmentAccount] = useState(null);
+  const [assignmentClients, setAssignmentClients] = useState([]);
+  const [assignmentClientId, setAssignmentClientId] = useState("");
+  const [assignmentType, setAssignmentType] = useState("profile");
+  const [assignmentDate, setAssignmentDate] = useState(today());
+  const [assignmentNotes, setAssignmentNotes] = useState("");
+  const [assignmentAvailability, setAssignmentAvailability] = useState(null);
+  const [assignmentLoading, setAssignmentLoading] = useState(false);
+  const [assignmentSaving, setAssignmentSaving] = useState(false);
+  const [assignmentNotice, setAssignmentNotice] = useState("");
   const [editingId, setEditingId] = useState(null);
   const credentialsRequest = useRef(0);
   const [form, setForm] = useState(blank);
@@ -223,6 +234,30 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
 
   useEffect(() => { let active = true; if (canEdit) supabase.from("suppliers").select("name").eq("active", true).order("name").then(({ data }) => { if (active) setSupplierSuggestions(data || []); }); return () => { active = false; }; }, [canEdit]);
 
+  useEffect(() => {
+    let active = true;
+    if (canEdit) supabase.rpc("list_inventory_assignment_clients").then(({ data, error }) => {
+      if (!active) return;
+      setAssignmentClients(error ? [] : data || []);
+    });
+    return () => { active = false; };
+  }, [canEdit, userId]);
+
+  useEffect(() => {
+    let active = true;
+    if (!assignmentOpen || !assignmentAccount) return () => { active = false; };
+    supabase.rpc("inventory_account_assignment_options", {
+      p_inventory_account_id: assignmentAccount.id,
+      p_starts_on: assignmentDate || today(),
+    }).then(({ data, error }) => {
+      if (!active) return;
+      if (error) setAssignmentNotice(`No se pudo consultar la disponibilidad: ${error.message}`);
+      else setAssignmentAvailability(Array.isArray(data) ? data[0] || null : data);
+      setAssignmentLoading(false);
+    });
+    return () => { active = false; };
+  }, [assignmentOpen, assignmentAccount, assignmentDate]);
+
   const rows = useMemo(() => accounts
     .map((row) => ({ ...row, expirationDate: expiration(row.purchaseDate, row.duration, row.unit) }))
     .sort((a, b) => (a.expirationDate || "9999").localeCompare(b.expirationDate || "9999")), [accounts]);
@@ -252,6 +287,38 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   function openNew() {
     credentialsRequest.current += 1;
     setEditingId(null); setForm(blank()); setNotice(""); setFormOpen(true);
+  }
+  async function openAssignment(row) {
+    setAssignmentAccount(row);
+    setAssignmentClientId("");
+    setAssignmentType("profile");
+    setAssignmentDate(today());
+    setAssignmentNotes("");
+    setAssignmentNotice("");
+    setAssignmentAvailability(null);
+    setAssignmentLoading(true);
+    setAssignmentOpen(true);
+  }
+  async function assignAccount(event) {
+    event.preventDefault();
+    if (!assignmentAccount || !assignmentClientId || !assignmentType) return;
+    setAssignmentSaving(true);
+    setAssignmentNotice("");
+    const { data, error } = await supabase.rpc("assign_inventory_account_to_client", {
+      p_client_id: assignmentClientId,
+      p_inventory_account_id: assignmentAccount.id,
+      p_delivery_type: assignmentType,
+      p_starts_on: assignmentDate || today(),
+      p_notes: assignmentNotes.trim(),
+    });
+    setAssignmentSaving(false);
+    if (error) {
+      setAssignmentNotice(`No se pudo asignar: ${error.message}`);
+      return;
+    }
+    const client = assignmentClients.find((item) => item.id === assignmentClientId);
+    setAssignmentOpen(false);
+    setNotice(`${data?.profile_name || (assignmentType === "full_account" ? "Cuenta completa" : "Perfil")} asignado a ${client?.full_name || "cliente"}. Vigencia: 28 días.`);
   }
   async function reportIssue(event) {
     event.preventDefault();
@@ -488,7 +555,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
               <td>{row.duration} {UNITS[row.unit] || "meses"}</td>
               <td>{row.customers?.length ? <div className="customer-list">{row.customers.map((name, index) => <span key={`${name}-${index}`}>{name}</span>)}</div> : <span className="unassigned-label">Sin asignar</span>}</td>
               <td>{row.cost === "" || row.cost == null ? "—" : new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(row.cost))}</td>
-              <td><div className="row-actions">{canEdit && <><button type="button" onClick={() => openEdit(row)}>Editar</button><button className="delete-row" type="button" aria-label={`Eliminar ${row.accountLabel}`} onClick={() => remove(row)}><Trash2 size={16} /></button></>}</div></td>
+              <td><div className="row-actions">{canEdit && <>{row.operationalStatus === "available" && status.key !== "expired" && <button className="assign-account-button" type="button" onClick={() => openAssignment(row)} title="Asignar a un cliente">Asignar</button>}<button type="button" onClick={() => openEdit(row)}>Editar</button><button className="delete-row" type="button" aria-label={`Eliminar ${row.accountLabel}`} onClick={() => remove(row)}><Trash2 size={16} /></button></>}</div></td>
             </tr>;
           })}</tbody>
         </table>
@@ -496,6 +563,28 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
       </div>
       <footer className="inventory-footer"><span>{visible.length} de {accounts.length} cuentas</span><span>Vencimiento calculado desde fecha de compra + duración.</span></footer>
     </section>
+
+    {assignmentOpen && assignmentAccount && <div className="inventory-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !assignmentSaving) setAssignmentOpen(false); }}>
+      <section className="inventory-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-assignment-title">
+        <header className="modal-heading"><div><p className="inventory-eyebrow">ASIGNACIÓN DESDE INVENTARIO</p><h2 id="inventory-assignment-title">Entregar a un cliente</h2></div><button type="button" className="modal-close" aria-label="Cerrar" onClick={() => !assignmentSaving && setAssignmentOpen(false)}><X size={20} /></button></header>
+        <form className="inventory-form" onSubmit={assignAccount}>
+          <p className="assignment-account-summary span-two"><strong>{assignmentAccount.service}</strong><span>{assignmentAccount.accountLabel} · vence {dateLabel(expiration(assignmentAccount.purchaseDate, assignmentAccount.duration, assignmentAccount.unit))}</span></p>
+          <label className="span-two">Cliente registrado<select value={assignmentClientId} onChange={(event) => setAssignmentClientId(event.target.value)} required><option value="">Selecciona un cliente</option>{assignmentClients.map((client) => <option key={client.id} value={client.id}>{client.full_name}{client.phone ? ` · ${client.phone}` : ""}</option>)}</select></label>
+          <label className="span-two">Tipo de entrega<select value={assignmentType} onChange={(event) => setAssignmentType(event.target.value)} disabled={assignmentLoading}>
+            <option value="profile" disabled={Boolean(assignmentAvailability && assignmentAvailability.available_profiles < 1)}>Un perfil{assignmentAvailability ? ` · ${assignmentAvailability.available_profiles} disponible(s)` : ""}</option>
+            <option value="full_account" disabled={Boolean(assignmentAvailability && !assignmentAvailability.full_account_available)}>Cuenta completa</option>
+          </select></label>
+          <label>Fecha de inicio<input type="date" value={assignmentDate} onChange={(event) => { setAssignmentDate(event.target.value); setAssignmentLoading(true); setAssignmentAvailability(null); }} required /></label>
+          <label>Vigencia<input value="28 días" readOnly /></label>
+          <label className="span-two">Notas (opcional)<textarea value={assignmentNotes} onChange={(event) => setAssignmentNotes(event.target.value)} maxLength={500} rows="2" placeholder="Instrucciones o detalles de la asignación" /></label>
+          {assignmentLoading && <p className="form-notice span-two">Consultando perfiles disponibles…</p>}
+          {!assignmentLoading && !assignmentClients.length && <p className="form-notice span-two">No se encontraron clientes para esta cuenta de usuario.</p>}
+          {assignmentNotice && <p className="form-notice span-two" role="status">{assignmentNotice}</p>}
+          <small className="span-two">La disponibilidad se vuelve a comprobar al guardar. La asignación aparecerá en el historial del cliente.</small>
+          <footer className="form-actions"><button className="inv-button secondary" type="button" onClick={() => setAssignmentOpen(false)} disabled={assignmentSaving}>Cancelar</button><button className="inv-button primary" type="submit" disabled={assignmentSaving || assignmentLoading || !assignmentAvailability || !assignmentClientId || (assignmentType === "profile" && assignmentAvailability.available_profiles < 1) || (assignmentType === "full_account" && !assignmentAvailability.full_account_available)}><UserPlus size={17} /> {assignmentSaving ? "Asignando…" : "Asignar 28 días"}</button></footer>
+        </form>
+      </section>
+    </div>}
 
     {issueOpen && <div className="inventory-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !issueSaving) setIssueOpen(false); }}>
       <section className="inventory-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-issue-title">
