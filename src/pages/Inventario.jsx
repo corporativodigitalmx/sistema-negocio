@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Boxes, CalendarDays, Check, Download, FileUp, Plus, Search, Trash2, UserRound, X } from "lucide-react";
+import { AlertTriangle, Boxes, CalendarDays, Check, ClipboardPaste, Download, FileUp, Plus, Search, Trash2, UserRound, X } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import "./Inventario.css";
 
@@ -69,7 +69,7 @@ function toDatabase(row, userId) {
   return { id: row.id, user_id: row.ownerId || userId, service: row.service, account_label: row.accountLabel,
     provider: row.provider, purchase_date: row.purchaseDate, duration: 28,
     unit: "days", profile_capacity: Number(row.profileCapacity || 5), customers: row.customers, cost: row.cost === "" ? null : row.cost, notes: row.notes,
-    store_published: Boolean(row.storePublished), store_title: row.storeTitle || row.service, store_description: row.storeDescription || "",
+    store_published: Boolean(row.storePublished), store_title: row.storeTitle || "", store_description: row.storeDescription || "",
     store_public_profile_price: row.storePublicProfilePrice === "" ? null : Number(row.storePublicProfilePrice),
     store_public_account_price: row.storePublicAccountPrice === "" ? null : Number(row.storePublicAccountPrice),
     store_reseller_profile_price: row.storeResellerProfilePrice === "" ? null : Number(row.storeResellerProfilePrice),
@@ -81,6 +81,35 @@ function blank() {
 function formFrom(row) {
   return { service: row.service, accountLabel: row.accountLabel, provider: row.provider, purchaseDate: row.purchaseDate, duration: "28", unit: "days", profileCapacity: String(row.profileCapacity ?? 5), customers: (row.customers || []).join(", "), cost: row.cost ?? "", notes: row.notes || "", storePublished: row.storePublished || false, storeTitle: row.storeTitle || row.service, storeDescription: row.storeDescription || "", storePublicProfilePrice: row.storePublicProfilePrice ?? "", storePublicAccountPrice: row.storePublicAccountPrice ?? "", storeResellerProfilePrice: row.storeResellerProfilePrice ?? "", storeResellerAccountPrice: row.storeResellerAccountPrice ?? "" };
 }
+function parseInventoryBatch(value, defaults) {
+  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return { error: "Pega o escribe al menos una cuenta." };
+  if (lines.length > 10) return { error: "Puedes agregar hasta 10 cuentas por lote." };
+  const sharedCapacity = Number(defaults.profileCapacity);
+  if (!Number.isInteger(sharedCapacity) || sharedCapacity < 1 || sharedCapacity > 20) return { error: "La capacidad debe ser de 1 a 20 perfiles." };
+  const rows = [];
+  for (const [index, line] of lines.entries()) {
+    const structured = line.includes("|") || line.includes("\t");
+    const fields = structured ? line.split(line.includes("|") ? "|" : "\t").map((field) => field.trim()) : [line];
+    if (fields.length > 5) return { error: `Línea ${index + 1}: máximo 5 columnas (servicio, cuenta, proveedor, perfiles, fecha).` };
+    const [serviceField, labelField, providerField, capacityField, dateField] = fields;
+    const row = {
+      service: (structured ? serviceField : defaults.service) || defaults.service,
+      accountLabel: (structured ? labelField : labelField || serviceField || "").trim(),
+      provider: (providerField || defaults.provider).trim(),
+      profileCapacity: capacityField ? Number(capacityField) : sharedCapacity,
+      purchaseDate: dateField || defaults.purchaseDate,
+    };
+    if (!row.accountLabel) return { error: `Línea ${index + 1}: falta el identificador de la cuenta.` };
+    if (!row.provider) return { error: `Línea ${index + 1}: indica un proveedor general o uno en la fila.` };
+    if (row.accountLabel.length > 120 || row.provider.length > 100 || row.service.length > 100) return { error: `Línea ${index + 1}: revisa el largo de servicio, cuenta o proveedor.` };
+    if (!Number.isInteger(row.profileCapacity) || row.profileCapacity < 1 || row.profileCapacity > 20) return { error: `Línea ${index + 1}: perfiles debe ser un número entre 1 y 20.` };
+    const date = parseDate(row.purchaseDate);
+    if (!date || date.toISOString().slice(0, 10) !== row.purchaseDate) return { error: `Línea ${index + 1}: fecha inválida; usa AAAA-MM-DD.` };
+    rows.push(row);
+  }
+  return { rows };
+}
 
 export default function Inventario({ userId, isSuperadmin = false, canViewAll = isSuperadmin, canEdit = true }) {
   const [accounts, setAccounts] = useState([]);
@@ -91,6 +120,12 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   const [serviceFilter, setServiceFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [formOpen, setFormOpen] = useState(false);
+  const [addChoiceOpen, setAddChoiceOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchText, setBatchText] = useState("");
+  const [batchDefaults, setBatchDefaults] = useState({ service: "Netflix", provider: "", purchaseDate: today(), profileCapacity: "5" });
+  const [batchSaving, setBatchSaving] = useState(false);
+  const [batchNotice, setBatchNotice] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(blank);
   const [notice, setNotice] = useState("");
@@ -158,6 +193,15 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   function openNew() {
     setEditingId(null); setForm(blank()); setNotice(""); setFormOpen(true);
   }
+  function chooseAddMode(mode) {
+    setAddChoiceOpen(false);
+    setNotice("");
+    if (mode === "single") { openNew(); return; }
+    setBatchText("");
+    setBatchNotice("");
+    setBatchDefaults({ service: "Netflix", provider: "", purchaseDate: today(), profileCapacity: "5" });
+    setBatchOpen(true);
+  }
   function openEdit(row) {
     setEditingId(row.id); setForm(formFrom(row)); setNotice(""); setFormOpen(true);
   }
@@ -178,16 +222,25 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     if (!Number.isInteger(profileCapacity) || profileCapacity < 1 || profileCapacity > 20) {
       setNotice("La capacidad debe ser de 1 a 20 perfiles."); return;
     }
+    const existingAccount = editingId ? accounts.find((item) => item.id === editingId) : null;
+    const storeFields = isSuperadmin ? {
+      storePublished: form.storePublished, storeTitle: form.storeTitle.trim() || form.service,
+      storeDescription: form.storeDescription.trim(), storePublicProfilePrice: form.storePublicProfilePrice,
+      storePublicAccountPrice: form.storePublicAccountPrice, storeResellerProfilePrice: form.storeResellerProfilePrice,
+      storeResellerAccountPrice: form.storeResellerAccountPrice,
+    } : {
+      storePublished: existingAccount?.storePublished || false, storeTitle: existingAccount?.storeTitle || "",
+      storeDescription: existingAccount?.storeDescription || "", storePublicProfilePrice: existingAccount?.storePublicProfilePrice ?? "",
+      storePublicAccountPrice: existingAccount?.storePublicAccountPrice ?? "", storeResellerProfilePrice: existingAccount?.storeResellerProfilePrice ?? "",
+      storeResellerAccountPrice: existingAccount?.storeResellerAccountPrice ?? "",
+    };
     const row = {
       id: editingId || id(), service: form.service, accountLabel: form.accountLabel.trim(),
       provider: form.provider.trim(), purchaseDate: form.purchaseDate, duration: 28, unit: "days",
       profileCapacity,
       customers: form.customers.split(/[,\n]/).map((name) => name.trim()).filter(Boolean),
       cost: form.cost === "" ? "" : Number(form.cost), notes: form.notes.trim(),
-      storePublished: form.storePublished, storeTitle: form.storeTitle.trim() || form.service,
-      storeDescription: form.storeDescription.trim(), storePublicProfilePrice: form.storePublicProfilePrice,
-      storePublicAccountPrice: form.storePublicAccountPrice, storeResellerProfilePrice: form.storeResellerProfilePrice,
-      storeResellerAccountPrice: form.storeResellerAccountPrice,
+      ...storeFields,
     };
     setSaving(true);
     const result = editingId
@@ -200,6 +253,49 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     persistLocal(userId, editingId ? accounts.map((item) => item.id === editingId ? saved : item) : [saved, ...accounts]);
     setNotice(editingId ? "Cuenta actualizada en Supabase." : "Cuenta agregada en Supabase.");
     closeForm();
+  }
+  async function pasteBatchFromClipboard() {
+    try {
+      if (!navigator.clipboard?.readText) throw new Error("El navegador no permite leer el portapapeles desde esta página.");
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) { setBatchNotice("El portapapeles está vacío."); return; }
+      setBatchText(text);
+      setBatchNotice("Lista pegada. Revisa las cuentas antes de agregarlas.");
+    } catch (error) {
+      setBatchNotice(`${error.message || "No se pudo leer el portapapeles."} También puedes pegar con Ctrl+V o el menú del navegador.`);
+    }
+  }
+  async function saveBatch(event) {
+    event.preventDefault();
+    setBatchNotice("");
+    const parsed = parseInventoryBatch(batchText, batchDefaults);
+    if (parsed.error) { setBatchNotice(parsed.error); return; }
+    const existing = new Set(accounts.map((row) => row.accountLabel.trim().toLocaleLowerCase("es-MX")));
+    const added = new Set();
+    for (const row of parsed.rows) {
+      const key = row.accountLabel.toLocaleLowerCase("es-MX");
+      if (existing.has(key) || added.has(key)) {
+        setBatchNotice(`La cuenta “${row.accountLabel}” está repetida en el inventario o en la lista.`);
+        return;
+      }
+      added.add(key);
+    }
+    setBatchSaving(true);
+    const rowsToInsert = parsed.rows.map((row) => toDatabase({
+      id: id(), ownerId: userId, ...row, duration: 28, unit: "days", customers: [], cost: "", notes: "",
+      storePublished: false, storeTitle: "", storeDescription: "", storePublicProfilePrice: "",
+      storePublicAccountPrice: "", storeResellerProfilePrice: "", storeResellerAccountPrice: "",
+    }, userId));
+    const { data, error } = await supabase.from(TABLE).insert(rowsToInsert).select("*");
+    setBatchSaving(false);
+    if (error) { setBatchNotice(`No se pudo guardar el lote en Supabase: ${error.message}`); return; }
+    const savedRows = (data || []).map(fromDatabase);
+    const merged = [...savedRows, ...accounts];
+    setAccounts(merged);
+    persistLocal(userId, merged);
+    setBatchOpen(false);
+    setBatchNotice("");
+    setNotice(`Se agregaron ${savedRows.length} cuentas individuales al inventario.`);
   }
   async function remove(row) {
     if (!window.confirm(`¿Eliminar “${row.accountLabel}” del inventario?`)) return;
@@ -251,7 +347,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
       <div className="inventory-actions">
         <button className="inv-button secondary" type="button" onClick={exportBackup} disabled={!accounts.length}><Download size={17} /> Respaldo</button>
         <label className="inv-button secondary upload-button"><FileUp size={17} /> Restaurar<input type="file" accept="application/json,.json" onChange={restoreBackup} /></label>
-        {canEdit && <button className="inv-button primary" type="button" onClick={openNew}><Plus size={18} /> Nueva cuenta</button>}
+        {canEdit && <button className="inv-button primary" type="button" onClick={() => setAddChoiceOpen(true)}><Plus size={18} /> Agregar cuentas</button>}
       </div>
     </header>
 
@@ -291,10 +387,39 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
             </tr>;
           })}</tbody>
         </table>
-        {!loading && !visible.length && <div className="inventory-empty"><span className="empty-icon"><Boxes size={25} /></span><h2>{accounts.length ? "No hay coincidencias" : "Tu inventario empieza aquí"}</h2><p>{accounts.length ? "Prueba con otra búsqueda o filtro." : "Registra una cuenta para controlar su proveedor, vencimiento y clientes."}</p>{!accounts.length && canEdit && <button className="inv-button primary" onClick={openNew}><Plus size={18} /> Agregar primera cuenta</button>}</div>}
+        {!loading && !visible.length && <div className="inventory-empty"><span className="empty-icon"><Boxes size={25} /></span><h2>{accounts.length ? "No hay coincidencias" : "Tu inventario empieza aquí"}</h2><p>{accounts.length ? "Prueba con otra búsqueda o filtro." : "Registra una cuenta para controlar su proveedor, vencimiento y clientes."}</p>{!accounts.length && canEdit && <button className="inv-button primary" onClick={() => setAddChoiceOpen(true)}><Plus size={18} /> Agregar cuentas</button>}</div>}
       </div>
       <footer className="inventory-footer"><span>{visible.length} de {accounts.length} cuentas</span><span>Vencimiento calculado desde fecha de compra + duración.</span></footer>
     </section>
+
+    {addChoiceOpen && <div className="inventory-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAddChoiceOpen(false); }}>
+      <section className="inventory-modal inventory-add-choice" role="dialog" aria-modal="true" aria-labelledby="inventory-add-choice-title">
+        <header className="modal-heading"><div><p className="inventory-eyebrow">AGREGAR AL INVENTARIO</p><h2 id="inventory-add-choice-title">¿Cómo quieres agregar?</h2></div><button type="button" className="modal-close" aria-label="Cerrar" onClick={() => setAddChoiceOpen(false)}><X size={20} /></button></header>
+        <div className="inventory-mode-options">
+          <button type="button" className="inventory-mode-option" onClick={() => chooseAddMode("single")}><span className="inventory-mode-icon"><Plus size={20} /></span><strong>Una cuenta</strong><small>Completa el formulario para agregar una cuenta individual.</small></button>
+          <button type="button" className="inventory-mode-option" onClick={() => chooseAddMode("batch")}><span className="inventory-mode-icon"><Boxes size={20} /></span><strong>Un lote</strong><small>Pega una lista de hasta 10 cuentas y se guardarán por separado.</small></button>
+        </div>
+      </section>
+    </div>}
+
+    {batchOpen && <div className="inventory-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !batchSaving) setBatchOpen(false); }}>
+      <section className="inventory-modal inventory-batch-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-batch-title">
+        <header className="modal-heading"><div><p className="inventory-eyebrow">CARGA POR LOTE · HASTA 10</p><h2 id="inventory-batch-title">Pega las cuentas</h2></div><button type="button" className="modal-close" aria-label="Cerrar" onClick={() => !batchSaving && setBatchOpen(false)}><X size={20} /></button></header>
+        <form className="inventory-form" onSubmit={saveBatch}>
+          <label>Servicio general<select value={batchDefaults.service} onChange={(event) => setBatchDefaults((current) => ({ ...current, service: event.target.value }))}>{SERVICES.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>Proveedor general<input value={batchDefaults.provider} onChange={(event) => setBatchDefaults((current) => ({ ...current, provider: event.target.value }))} placeholder="Se puede reemplazar en cada fila" maxLength={100} /></label>
+          <label>Fecha de compra general<input type="date" value={batchDefaults.purchaseDate} onChange={(event) => setBatchDefaults((current) => ({ ...current, purchaseDate: event.target.value }))} required /></label>
+          <label>Perfiles por cuenta<input type="number" min="1" max="20" value={batchDefaults.profileCapacity} onChange={(event) => setBatchDefaults((current) => ({ ...current, profileCapacity: event.target.value }))} required /></label>
+          <div className="inventory-batch-input span-two">
+            <div className="inventory-batch-input-heading"><label htmlFor="inventory-batch-list">Lista de cuentas</label><button className="inv-button secondary" type="button" onClick={pasteBatchFromClipboard}><ClipboardPaste size={16} /> Pegar portapapeles</button></div>
+            <textarea id="inventory-batch-list" value={batchText} onChange={(event) => { setBatchText(event.target.value); setBatchNotice(""); }} rows="8" placeholder={"Una cuenta por línea:\ncuenta1@email.com\ncuenta2@email.com\n\nO una fila con columnas: Servicio | identificador | proveedor | perfiles | fecha (AAAA-MM-DD)"} required />
+            <small>{batchText.split(/\r?\n/).filter((line) => line.trim()).length} / 10 cuentas. Las líneas vacías se ignoran.</small>
+          </div>
+          {batchNotice && <p className="form-notice span-two" role="status">{batchNotice}</p>}
+          <footer className="form-actions"><button className="inv-button secondary" type="button" onClick={() => setBatchOpen(false)} disabled={batchSaving}>Cancelar</button><button className="inv-button primary" type="submit" disabled={batchSaving || !batchText.trim()}><Check size={17} /> {batchSaving ? "Guardando lote…" : "Agregar cuentas al inventario"}</button></footer>
+        </form>
+      </section>
+    </div>}
 
     {formOpen && <div className="inventory-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeForm(); }}>
       <section className="inventory-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-form-title">

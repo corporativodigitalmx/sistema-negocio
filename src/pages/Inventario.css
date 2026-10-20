@@ -710,4 +710,18 @@ body {
 .inventory-store-toggle{display:flex!important;align-items:center;gap:9px}.inventory-store-toggle input{accent-color:#0ea5e9}
 .inventory-store-prices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .inventory-store-fields>small{color:#8194ac;font-size:10px;line-height:1.5}
+.inventory-add-choice{max-width:620px}
+.inventory-mode-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.inventory-mode-option{display:grid;justify-items:start;gap:8px;min-height:170px;padding:18px;border:1px solid #293d55;border-radius:12px;background:#101e30;color:#e5edf6;text-align:left;cursor:pointer;transition:border-color .18s,transform .18s,background .18s}
+.inventory-mode-option:hover{transform:translateY(-2px);border-color:#2a9bd2;background:#14263b}
+.inventory-mode-option strong{font-size:15px}
+.inventory-mode-option small{color:#91a2b8;font-size:12px;line-height:1.5}
+.inventory-mode-icon{display:grid;place-items:center;width:40px;height:40px;border:1px solid rgba(56,189,248,.2);border-radius:10px;background:rgba(14,165,233,.12);color:#67d1f4}
+.inventory-batch-modal{width:min(100%,760px)}
+.inventory-batch-input{display:grid;gap:8px}
+.inventory-batch-input-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.inventory-batch-input-heading>label{color:#b8c6d7;font-size:12px;font-weight:700}
+.inventory-batch-input textarea{min-height:170px;line-height:1.55;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.inventory-batch-input>small{color:#8194ac;font-size:10px}
 @media(max-width:560px){.inventory-store-prices{grid-template-columns:1fr}}
+@media(max-width:600px){.inventory-mode-options{grid-template-columns:1fr}.inventory-mode-option{min-height:135px}.inventory-batch-input-heading{align-items:flex-start;flex-direction:column}}
