@@ -149,6 +149,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   const [query, setQuery] = useState("");
   const [serviceFilter, setServiceFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [credentialSearchResult, setCredentialSearchResult] = useState({ query: "", accountIds: new Set(), error: false });
   const [formOpen, setFormOpen] = useState(false);
   const [addChoiceOpen, setAddChoiceOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -204,6 +205,22 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     return () => { active = false; };
   }, [userId, canViewAll]);
 
+  useEffect(() => {
+    let active = true;
+    const search = query.trim().toLocaleLowerCase("es-MX");
+    if (!canEdit || !search) return () => { active = false; };
+    const timer = setTimeout(async () => {
+      const { data, error } = await supabase.rpc("search_inventory_credentials", { p_query: search });
+      if (!active) return;
+      if (error) {
+        setCredentialSearchResult({ query: search, accountIds: new Set(), error: true });
+        return;
+      }
+      setCredentialSearchResult({ query: search, accountIds: new Set((data || []).map((row) => row.inventory_account_id)), error: false });
+    }, 250);
+    return () => { active = false; clearTimeout(timer); };
+  }, [query, canEdit]);
+
   useEffect(() => { let active = true; if (canEdit) supabase.from("suppliers").select("name").eq("active", true).order("name").then(({ data }) => { if (active) setSupplierSuggestions(data || []); }); return () => { active = false; }; }, [canEdit]);
 
   const rows = useMemo(() => accounts
@@ -219,12 +236,18 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   }, { soon: 0, expired: 0, assigned: 0 }), [rows]);
 
   const visible = rows.filter((row) => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("es-MX");
     const text = [row.service, row.accountLabel, row.provider, ...(row.customers || [])].join(" ").toLocaleLowerCase("es-MX");
+    const matchesCredential = canEdit && credentialSearchResult.query === normalizedQuery && credentialSearchResult.accountIds.has(row.id);
     const status = statusFor(row.expirationDate).key;
-    return (!query || text.includes(query.trim().toLocaleLowerCase("es-MX")))
+    return (!normalizedQuery || text.includes(normalizedQuery) || matchesCredential)
       && (serviceFilter === "all" || row.service === serviceFilter)
       && (statusFilter === "all" || (statusFilter === "unassigned" ? !row.customers?.length : status === statusFilter));
   });
+
+  const credentialSearchStatus = !canEdit || !query.trim() ? "idle"
+    : credentialSearchResult.query !== query.trim().toLocaleLowerCase("es-MX") ? "searching"
+      : credentialSearchResult.error ? "error" : "idle";
 
   function openNew() {
     credentialsRequest.current += 1;
@@ -444,12 +467,14 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
 
     <section className="inventory-panel">
       <div className="inventory-toolbar">
-        <label className="inventory-search"><Search size={18} /><input aria-label="Buscar inventario" placeholder="Buscar cuenta, proveedor o cliente" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+        <label className="inventory-search"><Search size={18} /><input aria-label="Buscar inventario" placeholder="Buscar cuenta, proveedor, cliente, correo o contraseña" maxLength={500} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
         <div className="inventory-filters">
           <label><span>Servicio</span><select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}><option value="all">Todos</option>{SERVICES.map((item) => <option key={item}>{item}</option>)}</select></label>
           <label><span>Estado</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos</option><option value="active">Vigentes</option><option value="soon">Por vencer</option><option value="expired">Vencidas</option><option value="unassigned">Sin asignar</option></select></label>
         </div>
       </div>
+      {credentialSearchStatus === "searching" && <p className="inventory-search-status" role="status">Buscando también en correos y contraseñas guardados…</p>}
+      {credentialSearchStatus === "error" && <p className="inventory-search-status error" role="status">No se pudieron buscar las credenciales guardadas. Verifica tu permiso de inventario e inténtalo de nuevo.</p>}
 
       <div className="inventory-table-wrap">
         <table className="inventory-table">

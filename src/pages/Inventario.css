@@ -242,6 +242,15 @@ body {
   border-bottom: 1px solid #1b2b3f;
 }
 
+.inventory-search-status {
+  margin: 0;
+  padding: 9px 17px 0;
+  color: #8fa4bd;
+  font-size: 12px;
+}
+
+.inventory-search-status.error { color: #fda4af; }
+
 .inventory-search {
   display: flex;
   align-items: center;
