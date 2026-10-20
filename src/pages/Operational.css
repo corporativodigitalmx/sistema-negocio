@@ -41,6 +41,12 @@
   .dashboard-live .op-table-card > header { align-items: flex-start; flex-direction: column; }
 }
 .sales-new-client { display: flex; align-items: end; gap: 8px; padding-bottom: 7px; color: #94a3b8; font-size: 12px; }
+.sales-platform-field { display: grid; align-content: start; gap: 8px; color: #cbd5e1; font-size: 13px; }
+.sales-platform-field > label { display: grid; gap: 0; }
+.sales-account-toggle { justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
+.sales-account-toggle:disabled { opacity: .5; cursor: not-allowed; }
+.sales-account-hint { margin: 0 0 0 2px; line-height: 1.45; }
+.sales-account-hint.error { color: #fda4af; }
 .op-status.available { background: #0c302a; color: #6ee7b7; }
 .op-status.occupied { background: #351b24; color: #fda4af; }
 .sales-new-client button { display: inline-flex; align-items: center; gap: 5px; }
