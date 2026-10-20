@@ -251,6 +251,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
       setAssignmentStatuses(error ? {} : Object.fromEntries((data || []).map((row) => [row.inventory_account_id, {
         availableProfiles: row.available_profiles,
         occupied: row.account_occupied,
+        accountUsername: row.account_username || "",
       }])));
     });
     return () => { active = false; };
@@ -571,7 +572,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
           <tbody>{visible.map((row) => {
             const status = statusFor(row.expirationDate);
             return <tr key={row.id}>
-              <td><div className="inventory-account"><span className="service-mark">{row.service.slice(0, 1)}</span><span><strong>{row.accountLabel}</strong><small>{row.service}{row.operationalStatus === "reported" ? " · Con reporte" : row.operationalStatus === "replaced" ? " · Reemplazada" : ""}</small></span></div></td>
+              <td><div className="inventory-account"><span className="service-mark">{row.service.slice(0, 1)}</span><span><strong>{assignmentStatuses?.[row.id]?.accountUsername || "Sin correo o usuario guardado"}</strong><small>{row.service}{row.operationalStatus === "reported" ? " · Con reporte" : row.operationalStatus === "replaced" ? " · Reemplazada" : ""}</small></span></div></td>
               <td>{row.provider}</td>
               <td><span className={`expiry-pill ${status.key}`}>{status.label}</span><small className="table-date">{dateLabel(row.expirationDate)}</small></td>
               <td>{row.duration} {UNITS[row.unit] || "meses"}</td>
