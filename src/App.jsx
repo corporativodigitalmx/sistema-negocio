@@ -140,18 +140,18 @@ export default App;
 const styles = {
   app: {
     display: "flex",
-    height: "100vh",
+    minHeight: "100vh",
     background: "#020617",
   },
   main: {
     flex: 1,
     display: "flex",
     flexDirection: "column",
+    minWidth: 0,
+    overflow: "visible",
   },
   content: {
-    flex: 1,
     padding: "20px",
-    overflow: "auto",
   },
   loading: {
     height: "100vh",
