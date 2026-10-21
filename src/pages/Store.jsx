@@ -8,7 +8,11 @@ const money = (value) => new Intl.NumberFormat("es-MX", { style: "currency", cur
 export default function Store() {
   const [session, setSession] = useState(null);
   const [customer, setCustomer] = useState(null);
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
   const [items, setItems] = useState([]);
+  const [priceItems, setPriceItems] = useState([]);
+  const [savingPrices, setSavingPrices] = useState({});
+  const [priceNotice, setPriceNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [authMode, setAuthMode] = useState("");
@@ -18,14 +22,33 @@ export default function Store() {
   const [form, setForm] = useState({ name: "", email: "", whatsapp: "", password: "" });
   const [purchaseNotice, setPurchaseNotice] = useState("");
 
-  const refresh = useCallback(async (activeSession = session) => {
+  const refresh = useCallback(async (activeSession) => {
     setLoading(true); setError("");
-    const view = activeSession ? "reseller_store_catalog" : "public_store_catalog";
+    let admin = false;
+    if (activeSession) {
+      const { data: access } = await supabase.from("user_access").select("role").eq("user_id", activeSession.user.id).maybeSingle();
+      admin = access?.role === "superadmin";
+    }
+    setIsSuperadmin(admin);
+    const view = activeSession && !admin ? "reseller_store_catalog" : "public_store_catalog";
     const { data, error: queryError } = await supabase.from(view).select("*").order("service").order("store_title");
     if (queryError) { setError("No pudimos cargar el catálogo. Estamos preparando la tienda; vuelve a intentarlo en unos minutos."); setItems([]); }
     else { setItems(data || []); setError(""); }
+    if (admin && data?.length) {
+      const { data: editableRows, error: editableError } = await supabase.from("inventario_cuentas")
+        .select("id,service,store_title,store_public_profile_price,store_reseller_profile_price,store_public_account_price,store_reseller_account_price")
+        .in("id", data.map((item) => item.item_id));
+      if (editableError) { setPriceItems([]); setPriceNotice("No se pudo cargar la edición de precios."); }
+      else {
+        const stockById = new Map(data.map((item) => [item.item_id, item]));
+        setPriceItems((editableRows || []).map((row) => ({ ...row, catalog: stockById.get(row.id),
+          publicProfile: row.store_public_profile_price ?? "", resellerProfile: row.store_reseller_profile_price ?? "",
+          publicAccount: row.store_public_account_price ?? "", resellerAccount: row.store_reseller_account_price ?? "" })));
+        setPriceNotice("");
+      }
+    } else setPriceItems([]);
     setLoading(false);
-  }, [session]);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -71,6 +94,27 @@ export default function Store() {
   }
 
   async function signOut() { await supabase.auth.signOut(); setSession(null); setCustomer(null); }
+  function changePrice(itemId, field, value) {
+    setPriceItems((current) => current.map((item) => item.id === itemId ? { ...item, [field]: value } : item));
+  }
+  async function savePrices(item) {
+    const fields = {
+      store_public_profile_price: item.publicProfile,
+      store_reseller_profile_price: item.resellerProfile,
+      store_public_account_price: item.publicAccount,
+      store_reseller_account_price: item.resellerAccount,
+    };
+    if (Object.values(fields).some((value) => value !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0))) {
+      setPriceNotice("Los precios deben ser números iguales o mayores a cero."); return;
+    }
+    setSavingPrices((current) => ({ ...current, [item.id]: true })); setPriceNotice("");
+    const payload = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value === "" ? null : Number(value)]));
+    const { error: saveError } = await supabase.from("inventario_cuentas").update(payload).eq("id", item.id);
+    setSavingPrices((current) => ({ ...current, [item.id]: false }));
+    if (saveError) { setPriceNotice(`No se pudieron guardar los precios: ${saveError.message}`); return; }
+    setPriceNotice(`Precios de ${item.service} guardados.`);
+    await refresh(session);
+  }
   function beginPurchase(item, deliveryType) {
     if (!session) { openAuth("register"); setPurchaseNotice("Regístrate o inicia sesión para continuar con tu compra."); return; }
     const choice = deliveryType === "profile" ? "perfil" : "cuenta completa";
@@ -79,11 +123,18 @@ export default function Store() {
 
   return <main className="store-page">
     <header className="store-topbar"><a href="/" className="store-back"><ArrowLeft size={16} /> Inicio</a><a className="store-brand" href="/tienda"><span>CD</span> Corporativo Digital</a>
-      <div className="store-account">{session ? <><span>{customer?.full_name || session.user.email}{customer?.tier === "reseller" && <small><BadgeCheck size={13} /> Revendedor</small>}</span><button type="button" onClick={signOut}>Cerrar sesión</button></> : <button className="store-register-button" type="button" onClick={() => openAuth("register")}><UserRound size={16} /> Crear cuenta</button>}</div>
+      <div className="store-account">{session ? <><span>{customer?.full_name || session.user.email}{customer?.tier === "reseller" && <small><BadgeCheck size={13} /> Revendedor</small>}</span><button type="button" onClick={signOut}>Cerrar sesión</button></> : <><button type="button" onClick={() => openAuth("login")}>Iniciar sesión</button><button className="store-register-button" type="button" onClick={() => openAuth("register")}><UserRound size={16} /> Crear cuenta</button></>}</div>
     </header>
     <section className="store-hero"><span className="store-eyebrow"><ShoppingBag size={15} /> CATÁLOGO DIGITAL</span><h1>Encuentra tu próxima plataforma.</h1><p>Elige un perfil o una cuenta completa. La disponibilidad se actualiza desde el inventario.</p><div className="store-promise"><span><Boxes size={16} /> Existencias actualizadas</span><span><MessageCircle size={16} /> WhatsApp requerido para atención</span></div></section>
     {purchaseNotice && <p className="store-notice" role="status">{purchaseNotice}</p>}
     {error && <p className="store-notice error" role="alert">{error}</p>}
+    {isSuperadmin && <section className="store-admin-pricing" aria-label="Administración de precios de tienda"><div className="store-admin-heading"><span className="store-eyebrow">ADMINISTRACIÓN · SUPERUSUARIO</span><h2>Precios de la tienda</h2><p>Las cuentas disponibles del inventario aparecen aquí automáticamente. Ajusta los precios para consumidor y revendedor.</p></div>
+      {priceNotice && <p className={`store-notice${priceNotice.startsWith("No se") || priceNotice.startsWith("Los precios") ? " error" : ""}`} role="status">{priceNotice}</p>}
+      {priceItems.length ? <div className="store-admin-grid">{priceItems.map((item) => <article className="store-admin-card" key={item.id}><div className="store-admin-card-title"><span className="store-service-mark">{item.service.slice(0, 1)}</span><div><small>{item.service}</small><h3>{item.store_title?.trim() || item.service}</h3><p>{item.catalog?.available_profiles || 0} perfiles · {item.catalog?.full_account_available ? "cuenta completa disponible" : "cuenta completa ocupada"}</p></div></div>
+        <div className="store-admin-prices"><strong>Perfil</strong><label>Consumidor<input type="number" min="0" step="0.01" value={item.publicProfile} onChange={(event) => changePrice(item.id, "publicProfile", event.target.value)} placeholder="Consultar" /></label><label>Revendedor<input type="number" min="0" step="0.01" value={item.resellerProfile} onChange={(event) => changePrice(item.id, "resellerProfile", event.target.value)} placeholder="Consultar" /></label>
+          <strong>Cuenta completa</strong><label>Consumidor<input type="number" min="0" step="0.01" value={item.publicAccount} onChange={(event) => changePrice(item.id, "publicAccount", event.target.value)} placeholder="Consultar" /></label><label>Revendedor<input type="number" min="0" step="0.01" value={item.resellerAccount} onChange={(event) => changePrice(item.id, "resellerAccount", event.target.value)} placeholder="Consultar" /></label></div>
+        <button type="button" className="store-admin-save" disabled={Boolean(savingPrices[item.id])} onClick={() => savePrices(item)}>{savingPrices[item.id] ? "Guardando…" : "Guardar precios"}</button></article>)}</div> : !loading && <div className="store-empty"><span><Boxes size={23} /></span><h2>No hay cuentas disponibles para publicar</h2><p>Las cuentas aparecerán al estar disponibles, vigentes y tener correo y contraseña guardados en inventario.</p></div>}
+    </section>}
     {loading ? <div className="store-empty">Cargando catálogo…</div> : items.length ? <section className="store-grid" aria-label="Catálogo de productos">
       {items.map((item) => {
         const profilesAvailable = Number(item.available_profiles || 0) > 0;

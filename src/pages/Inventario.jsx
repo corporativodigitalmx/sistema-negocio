@@ -667,16 +667,9 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
           <label>Costo de compra (opcional)<span className="currency-field"><b>$</b><input name="cost" type="number" min="0" step="0.01" value={form.cost} onChange={changeForm} placeholder="0.00" /></span></label>
           <label>Notas (opcional)<input name="notes" value={form.notes} onChange={changeForm} placeholder="Perfil, renovación u observaciones" maxLength={300} /></label>
             {isSuperadmin && <div className="inventory-store-fields span-two">
-            <label className="inventory-store-toggle"><input type="checkbox" name="storePublished" checked={form.storePublished} onChange={(event) => setForm((current) => ({ ...current, storePublished: event.target.checked }))} /> Publicar esta cuenta en la tienda</label>
             <label>Nombre visible<input name="storeTitle" value={form.storeTitle} onChange={changeForm} placeholder={form.service} maxLength={100} /></label>
             <label>Descripción para el cliente<textarea name="storeDescription" value={form.storeDescription} onChange={changeForm} rows="2" maxLength={300} placeholder="Detalles visibles en la tienda" /></label>
-            <div className="inventory-store-prices">
-              <label>Perfil · precio público<input name="storePublicProfilePrice" type="number" min="0" step="0.01" value={form.storePublicProfilePrice} onChange={changeForm} placeholder="0.00" /></label>
-              <label>Perfil · precio revendedor<input name="storeResellerProfilePrice" type="number" min="0" step="0.01" value={form.storeResellerProfilePrice} onChange={changeForm} placeholder="0.00" /></label>
-              <label>Cuenta completa · público<input name="storePublicAccountPrice" type="number" min="0" step="0.01" value={form.storePublicAccountPrice} onChange={changeForm} placeholder="0.00" /></label>
-              <label>Cuenta completa · revendedor<input name="storeResellerAccountPrice" type="number" min="0" step="0.01" value={form.storeResellerAccountPrice} onChange={changeForm} placeholder="0.00" /></label>
-            </div>
-            <small>Solo se publica si hay precio configurado y existencia disponible. Los datos de acceso de la cuenta nunca se muestran.</small>
+            <small>Las cuentas vigentes y disponibles aparecerán automáticamente en la tienda. Configura los precios desde la tienda. Los datos de acceso nunca se muestran.</small>
           </div>}
           {notice && <p className="form-notice">{notice}</p>}
           <footer className="form-actions"><button className="inv-button secondary" type="button" onClick={closeForm} disabled={saving}>Cancelar</button><button className="inv-button primary" type="submit" disabled={saving}><Check size={17} /> {saving ? "Guardando…" : "Guardar cuenta"}</button></footer>
