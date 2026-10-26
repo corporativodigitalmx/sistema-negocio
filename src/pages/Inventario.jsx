@@ -45,6 +45,11 @@ function statusFor(value) {
   if (days <= 7) return { key: "soon", label: days === 0 ? "Vence hoy" : `Vence en ${days} d` };
   return { key: "active", label: "Vigente" };
 }
+function inventoryStatus(row, expirationDate) {
+  return row.operationalStatus === "replaced"
+    ? { key: "suspended", label: "Cuenta suspendida" }
+    : statusFor(expirationDate);
+}
 function keyFor(userId) { return `${KEY}:${userId || "local"}`; }
 function load(userId) {
   try {
@@ -74,6 +79,16 @@ function fromDatabase(row) {
     storePublicProfilePrice: row.store_public_profile_price ?? "", storePublicAccountPrice: row.store_public_account_price ?? "",
     storeResellerProfilePrice: row.store_reseller_profile_price ?? "", storeResellerAccountPrice: row.store_reseller_account_price ?? "",
     operationalStatus: row.inventory_operational_status || "available" };
+}
+function mergeCustomerNames(legacyNames, assignedNames) {
+  const names = new Map();
+  for (const value of [...(Array.isArray(legacyNames) ? legacyNames : []), ...(Array.isArray(assignedNames) ? assignedNames : [])]) {
+    const name = String(value || "").trim();
+    if (!name) continue;
+    const key = name.toLocaleLowerCase("es-MX");
+    if (!names.has(key)) names.set(key, name);
+  }
+  return [...names.values()];
 }
 function toDatabase(row, userId) {
   return { id: row.id, user_id: row.ownerId || userId, service: row.service, account_label: row.accountLabel,
@@ -166,6 +181,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   const [assignmentAccount, setAssignmentAccount] = useState(null);
   const [assignmentClients, setAssignmentClients] = useState([]);
   const [assignmentStatuses, setAssignmentStatuses] = useState(null);
+  const [assignedClientNames, setAssignedClientNames] = useState({});
   const [assignmentClientId, setAssignmentClientId] = useState("");
   const [assignmentType, setAssignmentType] = useState("profile");
   const [assignmentDate, setAssignmentDate] = useState(today());
@@ -185,8 +201,21 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
       setLoading(true);
       let request = supabase.from(TABLE).select("*");
       if (!canViewAll) request = request.eq("user_id", userId);
-      const { data, error } = await request.order("created_at", { ascending: false });
+      const [inventoryResult, clientNamesResult] = await Promise.all([
+        request.order("created_at", { ascending: false }),
+        supabase.rpc("inventory_account_client_names"),
+      ]);
+      const { data, error } = inventoryResult;
+      const { data: clientNameRows, error: clientNamesError } = clientNamesResult;
       if (!active) return;
+      if (clientNamesError) {
+        setAssignedClientNames({});
+        setNotice(`No se pudieron cargar los clientes asignados: ${clientNamesError.message}`);
+      } else {
+        setAssignedClientNames(Object.fromEntries((clientNameRows || []).map((row) => [
+          row.inventory_account_id, Array.isArray(row.client_names) ? row.client_names : [],
+        ])));
+      }
       if (error) {
         setConnectionError(true);
         setNotice(`No se pudo cargar desde Supabase: ${error.message}`);
@@ -273,38 +302,42 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
   }, [assignmentOpen, assignmentAccount, assignmentDate]);
 
   const rows = useMemo(() => accounts
-    .map((row) => ({ ...row, expirationDate: expiration(row.purchaseDate, row.duration, row.unit) }))
+    .map((row) => ({
+      ...row,
+      expirationDate: expiration(row.purchaseDate, row.duration, row.unit),
+      assignedClients: mergeCustomerNames(row.customers, assignedClientNames[row.id]),
+    }))
     .sort((a, b) => {
       const aAssignment = assignmentStatuses?.[a.id];
       const bAssignment = assignmentStatuses?.[b.id];
-      const aOccupied = Boolean(a.customers?.length || (aAssignment
+      const aOccupied = Boolean(a.assignedClients?.length || (aAssignment
         && a.operationalStatus === "available" && statusFor(a.expirationDate).key !== "expired"
         && Number(aAssignment.availableProfiles) < Number(a.profileCapacity || 5)));
-      const bOccupied = Boolean(b.customers?.length || (bAssignment
+      const bOccupied = Boolean(b.assignedClients?.length || (bAssignment
         && b.operationalStatus === "available" && statusFor(b.expirationDate).key !== "expired"
         && Number(bAssignment.availableProfiles) < Number(b.profileCapacity || 5)));
       if (aOccupied !== bOccupied) return Number(aOccupied) - Number(bOccupied);
       const aCreatedAt = Date.parse(a.createdAt || "") || 0;
       const bCreatedAt = Date.parse(b.createdAt || "") || 0;
       return bCreatedAt - aCreatedAt;
-    }), [accounts, assignmentStatuses]);
+    }), [accounts, assignmentStatuses, assignedClientNames]);
 
   const stats = useMemo(() => rows.reduce((sum, row) => {
     const status = statusFor(row.expirationDate).key;
     if (status === "soon") sum.soon += 1;
     if (status === "expired") sum.expired += 1;
-    sum.assigned += row.customers?.length || 0;
+    sum.assigned += row.assignedClients?.length || 0;
     return sum;
   }, { soon: 0, expired: 0, assigned: 0 }), [rows]);
 
   const visible = rows.filter((row) => {
     const normalizedQuery = query.trim().toLocaleLowerCase("es-MX");
-    const text = [row.service, row.accountLabel, row.provider, ...(row.customers || [])].join(" ").toLocaleLowerCase("es-MX");
+    const text = [row.service, row.accountLabel, row.provider, ...(row.assignedClients || [])].join(" ").toLocaleLowerCase("es-MX");
     const matchesCredential = canEdit && credentialSearchResult.query === normalizedQuery && credentialSearchResult.accountIds.has(row.id);
-    const status = statusFor(row.expirationDate).key;
+    const status = inventoryStatus(row, row.expirationDate).key;
     return (!normalizedQuery || text.includes(normalizedQuery) || matchesCredential)
       && (serviceFilter === "all" || row.service === serviceFilter)
-      && (statusFilter === "all" || (statusFilter === "unassigned" ? !row.customers?.length : status === statusFilter));
+      && (statusFilter === "all" || (statusFilter === "unassigned" ? !row.assignedClients?.length : status === statusFilter));
   });
 
   const credentialSearchStatus = !canEdit || !query.trim() ? "idle"
@@ -344,6 +377,12 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
       return;
     }
     const client = assignmentClients.find((item) => item.id === assignmentClientId);
+    if (client?.full_name) {
+      setAssignedClientNames((current) => ({
+        ...current,
+        [assignmentAccount.id]: mergeCustomerNames(current[assignmentAccount.id], [client.full_name]),
+      }));
+    }
     const remainingProfiles = Math.max(0, Number(assignmentAvailability?.available_profiles || 0) - (assignmentType === "profile" ? 1 : 0));
     const startsTodayOrEarlier = assignmentDate <= today();
     setAssignmentStatuses((current) => ({
@@ -573,7 +612,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
         <label className="inventory-search"><Search size={18} /><input aria-label="Buscar inventario" placeholder="Buscar cuenta, proveedor, cliente, correo o contraseña" maxLength={500} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
         <div className="inventory-filters">
           <label><span>Servicio</span><select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}><option value="all">Todos</option>{SERVICES.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label><span>Estado</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos</option><option value="active">Vigentes</option><option value="soon">Por vencer</option><option value="expired">Vencidas</option><option value="unassigned">Sin asignar</option></select></label>
+          <label><span>Estado</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos</option><option value="active">Vigentes</option><option value="soon">Por vencer</option><option value="expired">Vencidas</option><option value="suspended">Suspendidas</option><option value="unassigned">Sin asignar</option></select></label>
         </div>
       </div>
       {credentialSearchStatus === "searching" && <p className="inventory-search-status" role="status">Buscando también en correos y contraseñas guardados…</p>}
@@ -583,13 +622,13 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
         <table className="inventory-table">
           <thead><tr><th>Cuenta / servicio</th><th>Proveedor</th><th>Vencimiento</th><th>Duración</th><th>Clientes</th><th>Costo</th><th></th></tr></thead>
           <tbody>{visible.map((row) => {
-            const status = statusFor(row.expirationDate);
+            const status = inventoryStatus(row, row.expirationDate);
             return <tr key={row.id}>
               <td><div className="inventory-account"><span className="service-mark">{row.service.slice(0, 1)}</span><span><strong>{assignmentStatuses?.[row.id]?.accountUsername || "Sin correo o usuario guardado"}</strong><small>{row.service}{row.operationalStatus === "reported" ? " · Con reporte" : row.operationalStatus === "replaced" ? " · Reemplazada" : ""}</small></span></div></td>
               <td>{row.provider}</td>
               <td><span className={`expiry-pill ${status.key}`}>{status.label}</span><small className="table-date">{dateLabel(row.expirationDate)}</small></td>
               <td>{row.duration} {UNITS[row.unit] || "meses"}</td>
-              <td>{row.customers?.length ? <div className="customer-list">{row.customers.map((name, index) => <span key={`${name}-${index}`}>{name}</span>)}</div> : <span className="unassigned-label">Sin asignar</span>}</td>
+              <td>{row.assignedClients?.length ? <div className="customer-list">{row.assignedClients.map((name, index) => <span key={`${name}-${index}`}>{name}</span>)}</div> : <span className="unassigned-label">Sin asignar</span>}</td>
               <td>{row.cost === "" || row.cost == null ? "—" : new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(row.cost))}</td>
               <td><div className="row-actions">{canEdit && <>{row.operationalStatus === "available" && status.key !== "expired" && <button className={`assign-account-button${assignmentStatuses?.[row.id]?.occupied ? " occupied" : ""}`} type="button" onClick={() => !assignmentStatuses?.[row.id]?.occupied && openAssignment(row)} disabled={assignmentStatuses === null || Boolean(assignmentStatuses?.[row.id]?.occupied)} title={assignmentStatuses?.[row.id]?.occupied ? "Esta cuenta ya está ocupada" : "Asignar a un cliente"}>{assignmentStatuses === null ? "Cargando…" : assignmentStatuses?.[row.id]?.occupied ? "Ocupada" : "Asignar"}</button>}<button type="button" onClick={() => openEdit(row)}>Editar</button><button className="delete-row" type="button" aria-label={`Eliminar ${row.accountLabel}`} onClick={() => remove(row)}><Trash2 size={16} /></button></>}</div></td>
             </tr>;
