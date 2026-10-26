@@ -67,7 +67,7 @@ function accountKey(service, email) {
   return `${String(service || "").trim().toLocaleLowerCase("es-MX")}\u0000${String(email || "").trim().toLocaleLowerCase("es-MX")}`;
 }
 function fromDatabase(row) {
-  return { id: row.id, ownerId: row.user_id, service: row.service, accountLabel: row.account_label, provider: row.provider,
+  return { id: row.id, ownerId: row.user_id, createdAt: row.created_at || row.createdAt || null, service: row.service, accountLabel: row.account_label, provider: row.provider,
     purchaseDate: row.purchase_date, duration: row.duration, unit: row.unit,
     profileCapacity: row.profile_capacity ?? 5, customers: Array.isArray(row.customers) ? row.customers : [], cost: row.cost ?? "", notes: row.notes || "",
     storePublished: row.store_published ?? false, storeTitle: row.store_title || row.service, storeDescription: row.store_description || "",
@@ -274,7 +274,20 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
 
   const rows = useMemo(() => accounts
     .map((row) => ({ ...row, expirationDate: expiration(row.purchaseDate, row.duration, row.unit) }))
-    .sort((a, b) => (a.expirationDate || "9999").localeCompare(b.expirationDate || "9999")), [accounts]);
+    .sort((a, b) => {
+      const aAssignment = assignmentStatuses?.[a.id];
+      const bAssignment = assignmentStatuses?.[b.id];
+      const aOccupied = Boolean(a.customers?.length || (aAssignment
+        && a.operationalStatus === "available" && statusFor(a.expirationDate).key !== "expired"
+        && Number(aAssignment.availableProfiles) < Number(a.profileCapacity || 5)));
+      const bOccupied = Boolean(b.customers?.length || (bAssignment
+        && b.operationalStatus === "available" && statusFor(b.expirationDate).key !== "expired"
+        && Number(bAssignment.availableProfiles) < Number(b.profileCapacity || 5)));
+      if (aOccupied !== bOccupied) return Number(aOccupied) - Number(bOccupied);
+      const aCreatedAt = Date.parse(a.createdAt || "") || 0;
+      const bCreatedAt = Date.parse(b.createdAt || "") || 0;
+      return bCreatedAt - aCreatedAt;
+    }), [accounts, assignmentStatuses]);
 
   const stats = useMemo(() => rows.reduce((sum, row) => {
     const status = statusFor(row.expirationDate).key;
