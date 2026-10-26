@@ -119,19 +119,59 @@ export function Payments({ userId, canEdit }) {
   </ModuleShell>;
 }
 
-export function Accounts({ canEdit }) {
+export function Accounts({ canEdit, canNotifyClients = false }) {
   const [rows,setRows]=useState([]),[assignments,setAssignments]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(""),[query,setQuery]=useState("");
-  const refresh=useCallback(async()=>{setLoading(true);const [a,b]=await Promise.all([supabase.from("inventario_cuentas").select("id,service,account_label,provider,purchase_date,duration,unit,customers,cost,created_at,profile_capacity,inventory_operational_status").order("service"),supabase.from("client_account_assignments").select("id,client_id,inventory_account_id,profile_name,delivery_type,starts_on,expires_on,assignment_status,client:clients!client_account_assignments_client_id_fkey(full_name)")]);if(a.error)setError(a.error.message);else {setRows(a.data||[]);setError("");}if(b.error)setError(b.error.message);else setAssignments(b.data||[]);setLoading(false);},[]);
+  const refresh=useCallback(async()=>{
+    setLoading(true);
+    const clientFields=canNotifyClients?"full_name,phone":"full_name";
+    const [a,b]=await Promise.all([
+      supabase.from("inventario_cuentas").select("id,service,account_label,provider,purchase_date,duration,unit,customers,cost,created_at,profile_capacity,inventory_operational_status").order("service"),
+      supabase.from("client_account_assignments").select("id,client_id,inventory_account_id,profile_name,delivery_type,starts_on,expires_on,assignment_status,client:clients!client_account_assignments_client_id_fkey(" + clientFields + ")").order("expires_on")
+    ]);
+    if(a.error)setError(a.error.message);else{setRows(a.data||[]);setError("");}
+    if(b.error)setError(b.error.message);else setAssignments(b.data||[]);
+    setLoading(false);
+  },[canNotifyClients]);
   useEffect(()=>{queueMicrotask(()=>void refresh());},[refresh]);
-  const result=rows.map(row=>{const end=new Date(`${row.purchase_date}T12:00:00`);end.setDate(end.getDate()+28);const days=Math.ceil((end-new Date(`${today()}T12:00:00`))/86400000);return {...row,expires:end.toISOString().slice(0,10),days};});
-  const visible=result.map(r=>{const profiles=assignments.filter(a=>a.inventory_account_id===r.id),active=profiles.filter(a=>a.assignment_status!=="replaced"&&a.starts_on<=today()&&a.expires_on>=today()),profileCount=active.filter(a=>a.delivery_type!=="full_account").length+(r.customers||[]).length,full=active.some(a=>a.delivery_type==="full_account"),capacity=r.profile_capacity||5;return {...r,profiles,profileCount,availableProfiles:full||r.inventory_operational_status!=="available"?0:Math.max(0,capacity-profileCount),accountStatus:r.inventory_operational_status==="reported"?"reported":r.inventory_operational_status==="replaced"?"replaced":full||profileCount>=capacity?"occupied":"available"};}).filter(r=>`${r.service} ${r.account_label} ${r.provider} ${(r.customers||[]).join(" ")} ${r.profiles.map(a=>`${a.client?.full_name||""} ${a.profile_name}`).join(" ")}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const dateNumber=(value)=>{const [year,month,day]=String(value||"").slice(0,10).split("-").map(Number);return Date.UTC(year,month-1,day);};
+  const daysFromToday=(value)=>Math.round((dateNumber(value)-dateNumber(today()))/86400000);
+  const displayDate=(value)=>new Date(value+"T12:00:00").toLocaleDateString("es-MX",{day:"2-digit",month:"short",year:"numeric"});
+  const result=rows.map(row=>{const end=new Date(row.purchase_date+"T12:00:00");end.setDate(end.getDate()+28);const days=Math.ceil((end-new Date(today()+"T12:00:00"))/86400000);return {...row,expires:end.toISOString().slice(0,10),days};});
+  const visible=result.map(r=>{const profiles=assignments.filter(a=>a.inventory_account_id===r.id),active=profiles.filter(a=>a.assignment_status!=="replaced"&&a.starts_on<=today()&&a.expires_on>=today()),profileCount=active.filter(a=>a.delivery_type!=="full_account").length+(r.customers||[]).length,full=active.some(a=>a.delivery_type==="full_account"),capacity=r.profile_capacity||5;return {...r,profiles,profileCount,availableProfiles:full||r.inventory_operational_status!=="available"?0:Math.max(0,capacity-profileCount),accountStatus:r.inventory_operational_status==="reported"?"reported":r.inventory_operational_status==="replaced"?"replaced":full||profileCount>=capacity?"occupied":"available"};}).filter(r=>[r.service,r.account_label,r.provider,(r.customers||[]).join(" "),r.profiles.map(a=>(a.client?.full_name||"")+" "+a.profile_name).join(" ")].join(" ").toLowerCase().includes(query.trim().toLowerCase()));
+  const serviceByAccount=new Map(rows.map(row=>[row.id,row.service]));
+  const renewalRows=canNotifyClients?assignments.filter(assignment=>{
+    if(assignment.assignment_status!=="active"||!assignment.expires_on||daysFromToday(assignment.expires_on)>7)return false;
+    const service=serviceByAccount.get(assignment.inventory_account_id);
+    const profile=String(assignment.profile_name||"").trim().toLocaleLowerCase("es-MX");
+    const renewed=assignments.some(later=>later.id!==assignment.id&&later.client_id===assignment.client_id&&later.assignment_status==="active"&&later.starts_on>assignment.starts_on&&serviceByAccount.get(later.inventory_account_id)===service&&later.delivery_type===assignment.delivery_type&&String(later.profile_name||"").trim().toLocaleLowerCase("es-MX")===profile);
+    return !renewed;
+  }).map(assignment=>({...assignment,service:serviceByAccount.get(assignment.inventory_account_id)||"Cuenta",daysLeft:daysFromToday(assignment.expires_on)})).sort((a,b)=>a.expires_on.localeCompare(b.expires_on)):[];
+  const renewalGroups=Array.from(renewalRows.reduce((groups,assignment)=>{
+    const key=assignment.client_id;
+    if(!groups.has(key))groups.set(key,{id:key,name:assignment.client?.full_name||"Cliente",phone:assignment.client?.phone||"",items:[]});
+    groups.get(key).items.push(assignment);
+    return groups;
+  },new Map()).values());
+  const whatsappLink=(group)=>{
+    let digits=normalizePhone(group.phone);
+    if(digits.length===10)digits="52"+digits;
+    if(digits.startsWith("521")&&digits.length===13)digits="52"+digits.slice(3);
+    if(digits.length<11||digits.length>15)return "";
+    const items=group.items.map(item=>{
+      const access=item.delivery_type==="full_account"?"Cuenta completa":("Perfil "+(item.profile_name||"")).trim();
+      const expiry=item.daysLeft<0?"venció el "+displayDate(item.expires_on):item.daysLeft===0?"vence hoy":"vence el "+displayDate(item.expires_on);
+      return "• "+item.service+" · "+access+" — "+expiry;
+    }).join("\n");
+    const message="Hola "+group.name+", ¿cómo estás? Quería preguntarte si deseas renovar estos accesos:\n"+items+"\n\nAvísame cuáles te gustaría renovar. ¡Gracias!";
+    return "https://wa.me/"+digits+"?text="+encodeURIComponent(message);
+  };
   return <ModuleShell eyebrow="SERVICIOS Y ACCESOS" title="Cuentas" subtitle="Vista rápida de las cuentas registradas, sus clientes y próximos vencimientos." icon={<CreditCard/>} action={canEdit?<><Link className="op-button secondary" to="/inventario"><Plus size={17}/> Agregar por lote</Link><Link className="op-button" to="/inventario"><Boxes size={17}/> Gestionar inventario</Link></>:null}>
     <div className="op-stats"><Metric icon={<CreditCard/>} label="Cuentas" value={rows.length}/><Metric icon={<Check/>} label="Vigentes" value={result.filter(r=>r.days>7).length} tone="green"/><Metric icon={<Clock3/>} label="Vencen en 7 días" value={result.filter(r=>r.days>=0&&r.days<=7).length} tone="amber"/><Metric icon={<AlertTriangle/>} label="Vencidas" value={result.filter(r=>r.days<0).length} tone="red"/></div>
     {error&&<p className="op-notice error">{error}</p>}
-    <DataTable title="Cuentas y perfiles" search={query} setSearch={setQuery} loading={loading} empty="No hay cuentas registradas. Agrega una desde Inventario." hasRows={visible.length > 0}><table><thead><tr><th>Servicio / cuenta</th><th>Proveedor</th><th>Perfiles libres</th><th>Clientes / perfiles</th><th>Vence</th><th>Estado</th></tr></thead><tbody>{visible.map(r=><tr key={r.id}><td><strong>{r.service}</strong><small>{r.account_label}</small></td><td>{r.provider}</td><td>{r.availableProfiles} / {r.profile_capacity||5}</td><td>{r.profiles.length?r.profiles.map(a=>`${a.client?.full_name||"Cliente"} · ${a.delivery_type==="full_account"?"Cuenta completa":a.profile_name}${a.assignment_status==="replaced"?" (reemplazada)":""}`).join(", "):(r.customers||[]).length?(r.customers||[]).join(", "):"Sin asignar"}</td><td>{new Date(`${r.expires}T12:00:00`).toLocaleDateString("es-MX")}</td><td><Status value={r.days<0?"expired":r.days<=7?"soon":r.accountStatus}/></td></tr>)}</tbody></table></DataTable>
+    {canNotifyClients&&<section className="renewal-client-list"><header><div><h2>Renovaciones por WhatsApp</h2><p>Clientes con accesos que vencen en los próximos 7 días o ya vencieron.</p></div><span className="renewal-count">{renewalRows.length}</span></header>{loading?<p className="op-empty">Cargando recordatorios…</p>:renewalGroups.length?<div className="renewal-groups">{renewalGroups.map(group=>{const link=whatsappLink(group);return <article className="renewal-client-row" key={group.id}><div className="renewal-client-main"><strong>{group.name}</strong><small>{group.phone||"Sin teléfono registrado"} · {group.items.length} acceso(s)</small><ul>{group.items.map(item=><li key={item.id}><span>{item.service} · {item.delivery_type==="full_account"?"Cuenta completa":("Perfil "+(item.profile_name||"")).trim()}</span><small>{item.daysLeft<0?"Venció el "+displayDate(item.expires_on):item.daysLeft===0?"Vence hoy":"Vence el "+displayDate(item.expires_on)}</small></li>)}</ul></div><div className="renewal-client-action">{link?<a className="op-button" href={link} target="_blank" rel="noreferrer"><MessageCircle size={17}/> Enviar por WhatsApp</a>:<span className="phone-missing">Agrega un WhatsApp válido al cliente</span>}</div></article>;})}</div>:<p className="op-empty">No hay accesos próximos a vencer ni vencidos pendientes de renovación.</p>}<p className="renewal-note">Se abre WhatsApp con el mensaje listo para revisar. Solo se envía cuando confirmes desde WhatsApp.</p></section>}
+    <DataTable title="Cuentas y perfiles" search={query} setSearch={setQuery} loading={loading} empty="No hay cuentas registradas. Agrega una desde Inventario." hasRows={visible.length > 0}><table><thead><tr><th>Servicio / cuenta</th><th>Proveedor</th><th>Perfiles libres</th><th>Clientes / perfiles</th><th>Vence</th><th>Estado</th></tr></thead><tbody>{visible.map(r=><tr key={r.id}><td><strong>{r.service}</strong><small>{r.account_label}</small></td><td>{r.provider}</td><td>{r.availableProfiles} / {r.profile_capacity||5}</td><td>{r.profiles.length?r.profiles.map(a=>(a.client?.full_name||"Cliente")+" · "+(a.delivery_type==="full_account"?"Cuenta completa":a.profile_name)+(a.assignment_status==="replaced"?" (reemplazada)":"")).join(", "):(r.customers||[]).length?(r.customers||[]).join(", "):"Sin asignar"}</td><td>{new Date(r.expires+"T12:00:00").toLocaleDateString("es-MX")}</td><td><Status value={r.days<0?"expired":r.days<=7?"soon":r.accountStatus}/></td></tr>)}</tbody></table></DataTable>
   </ModuleShell>;
 }
-
 function ModuleShell({eyebrow,title,subtitle,icon,action,children}) { return <main className="op-page"><header className="op-heading"><div><p className="op-eyebrow">{eyebrow}</p><h1>{title}</h1><p>{subtitle}</p></div><div className="op-heading-icon">{icon}</div>{action&&<div className="op-heading-action">{action}</div>}</header>{children}</main>; }
 function Metric({icon,label,value,tone="blue"}) {return <article className={`op-metric ${tone}`}><span>{icon}</span><div><small>{label}</small><strong>{value}</strong></div></article>;}
 function DataTable({title,search,setSearch,loading,empty,hasRows,children}) {return <section className="op-table-card"><header><h2>{title}</h2><label className="op-search"><Search size={16}/><input placeholder="Buscar…" aria-label={`Buscar en ${title}`} value={search} onChange={e=>setSearch(e.target.value)}/></label></header>{loading?<p className="op-empty">Cargando…</p>:<div className="op-table-wrap">{children}{!hasRows&&<p className="op-empty">{empty}</p>}</div>}</section>;}
