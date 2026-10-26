@@ -21,6 +21,8 @@ export default function Store() {
   const [authError, setAuthError] = useState("");
   const [form, setForm] = useState({ name: "", email: "", whatsapp: "", password: "" });
   const [purchaseNotice, setPurchaseNotice] = useState("");
+  const [purchaseError, setPurchaseError] = useState("");
+  const [purchaseBusy, setPurchaseBusy] = useState("");
 
   const refresh = useCallback(async (activeSession) => {
     setLoading(true); setError("");
@@ -31,17 +33,21 @@ export default function Store() {
     }
     setIsSuperadmin(admin);
     const view = activeSession && !admin ? "reseller_store_catalog" : "public_store_catalog";
-    const { data, error: queryError } = await supabase.from(view).select("*").order("service").order("store_title");
+    const { data, error: queryError } = await supabase.from(view).select("*").order("service");
     if (queryError) { setError("No pudimos cargar el catálogo. Estamos preparando la tienda; vuelve a intentarlo en unos minutos."); setItems([]); }
     else { setItems(data || []); setError(""); }
-    if (admin && data?.length) {
+    if (admin) {
       const { data: editableRows, error: editableError } = await supabase.from("inventario_cuentas")
         .select("id,service,store_title,store_public_profile_price,store_reseller_profile_price,store_public_account_price,store_reseller_account_price")
-        .in("id", data.map((item) => item.item_id));
+        .order("service");
       if (editableError) { setPriceItems([]); setPriceNotice("No se pudo cargar la edición de precios."); }
       else {
-        const stockById = new Map(data.map((item) => [item.item_id, item]));
-        setPriceItems((editableRows || []).map((row) => ({ ...row, catalog: stockById.get(row.id),
+        const stockByService = new Map((data || []).map((item) => [item.service, item]));
+        const priceByService = new Map();
+        for (const row of editableRows || []) {
+          if (!priceByService.has(row.service)) priceByService.set(row.service, { ...row, catalog: stockByService.get(row.service) });
+        }
+        setPriceItems([...priceByService.values()].map((row) => ({ ...row,
           publicProfile: row.store_public_profile_price ?? "", resellerProfile: row.store_reseller_profile_price ?? "",
           publicAccount: row.store_public_account_price ?? "", resellerAccount: row.store_reseller_account_price ?? "" })));
         setPriceNotice("");
@@ -109,16 +115,20 @@ export default function Store() {
     }
     setSavingPrices((current) => ({ ...current, [item.id]: true })); setPriceNotice("");
     const payload = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value === "" ? null : Number(value)]));
-    const { error: saveError } = await supabase.from("inventario_cuentas").update(payload).eq("id", item.id);
+    const { error: saveError } = await supabase.from("inventario_cuentas").update(payload).eq("service", item.service);
     setSavingPrices((current) => ({ ...current, [item.id]: false }));
     if (saveError) { setPriceNotice(`No se pudieron guardar los precios: ${saveError.message}`); return; }
     setPriceNotice(`Precios de ${item.service} guardados.`);
     await refresh(session);
   }
-  function beginPurchase(item, deliveryType) {
-    if (!session) { openAuth("register"); setPurchaseNotice("Regístrate o inicia sesión para continuar con tu compra."); return; }
+  async function beginPurchase(item, deliveryType) {
+    if (!session) { openAuth("register"); setPurchaseNotice("Regístrate o inicia sesión para solicitar tu compra."); return; }
     const choice = deliveryType === "profile" ? "perfil" : "cuenta completa";
-    setPurchaseNotice(`Elegiste ${choice} de ${item.store_title}. El pago y la reserva automática se activarán al terminar la configuración de Mercado Pago.`);
+    setPurchaseBusy(`${item.service}:${deliveryType}`); setPurchaseError(""); setPurchaseNotice("");
+    const { data, error: orderError } = await supabase.rpc("request_store_purchase", { p_service: item.service, p_delivery_type: deliveryType });
+    setPurchaseBusy("");
+    if (orderError) { setPurchaseError(orderError.message || "No se pudo registrar la solicitud."); return; }
+    setPurchaseNotice(`Solicitud de ${choice} para ${item.store_title} registrada por ${money(data.amount)}. Folio ${String(data.sale_id).slice(0, 8)}. El pago en línea aún no está conectado; al confirmar el pago, el sistema asignará automáticamente el inventario.`);
   }
 
   return <main className="store-page">
@@ -127,10 +137,11 @@ export default function Store() {
     </header>
     <section className="store-hero"><span className="store-eyebrow"><ShoppingBag size={15} /> CATÁLOGO DIGITAL</span><h1>Encuentra tu próxima plataforma.</h1><p>Elige un perfil o una cuenta completa. La disponibilidad se actualiza desde el inventario.</p><div className="store-promise"><span><Boxes size={16} /> Existencias actualizadas</span><span><MessageCircle size={16} /> WhatsApp requerido para atención</span></div></section>
     {purchaseNotice && <p className="store-notice" role="status">{purchaseNotice}</p>}
+    {purchaseError && <p className="store-notice error" role="alert">{purchaseError}</p>}
     {error && <p className="store-notice error" role="alert">{error}</p>}
     {isSuperadmin && <section className="store-admin-pricing" aria-label="Administración de precios de tienda"><div className="store-admin-heading"><span className="store-eyebrow">ADMINISTRACIÓN · SUPERUSUARIO</span><h2>Precios de la tienda</h2><p>Las cuentas disponibles del inventario aparecen aquí automáticamente. Ajusta los precios para consumidor y revendedor.</p></div>
       {priceNotice && <p className={`store-notice${priceNotice.startsWith("No se") || priceNotice.startsWith("Los precios") ? " error" : ""}`} role="status">{priceNotice}</p>}
-      {priceItems.length ? <div className="store-admin-grid">{priceItems.map((item) => <article className="store-admin-card" key={item.id}><div className="store-admin-card-title"><span className="store-service-mark">{item.service.slice(0, 1)}</span><div><small>{item.service}</small><h3>{item.store_title?.trim() || item.service}</h3><p>{item.catalog?.available_profiles || 0} perfiles · {item.catalog?.full_account_available ? "cuenta completa disponible" : "cuenta completa ocupada"}</p></div></div>
+      {priceItems.length ? <div className="store-admin-grid">{priceItems.map((item) => <article className="store-admin-card" key={item.service}><div className="store-admin-card-title"><span className="store-service-mark">{item.service.slice(0, 1)}</span><div><small>{item.service}</small><h3>{item.catalog?.store_title?.trim() || item.service}</h3><p>{item.catalog?.available_profiles || 0} perfiles · {item.catalog?.available_full_accounts || 0} cuentas completas disponibles</p></div></div>
         <div className="store-admin-prices"><strong>Perfil</strong><label>Consumidor<input type="number" min="0" step="0.01" value={item.publicProfile} onChange={(event) => changePrice(item.id, "publicProfile", event.target.value)} placeholder="Consultar" /></label><label>Revendedor<input type="number" min="0" step="0.01" value={item.resellerProfile} onChange={(event) => changePrice(item.id, "resellerProfile", event.target.value)} placeholder="Consultar" /></label>
           <strong>Cuenta completa</strong><label>Consumidor<input type="number" min="0" step="0.01" value={item.publicAccount} onChange={(event) => changePrice(item.id, "publicAccount", event.target.value)} placeholder="Consultar" /></label><label>Revendedor<input type="number" min="0" step="0.01" value={item.resellerAccount} onChange={(event) => changePrice(item.id, "resellerAccount", event.target.value)} placeholder="Consultar" /></label></div>
         <button type="button" className="store-admin-save" disabled={Boolean(savingPrices[item.id])} onClick={() => savePrices(item)}>{savingPrices[item.id] ? "Guardando…" : "Guardar precios"}</button></article>)}</div> : !loading && <div className="store-empty"><span><Boxes size={23} /></span><h2>No hay cuentas disponibles para publicar</h2><p>Las cuentas aparecerán al estar disponibles, vigentes y tener correo y contraseña guardados en inventario.</p></div>}
@@ -141,12 +152,12 @@ export default function Store() {
         const accountAvailable = Boolean(item.full_account_available);
         const soldOut = !profilesAvailable && !accountAvailable;
         return <article className={`store-card ${soldOut ? "sold-out" : "in-stock"}`} key={item.item_id}>
-          <div className="store-card-top"><span className="store-service-mark">{item.service.slice(0, 1)}</span><span className={`store-stock ${soldOut ? "out" : "available"}`}><i />{soldOut ? "Agotada" : "Disponible"}</span></div>
+          <div className="store-card-top"><span className="store-service-mark">{item.service.slice(0, 1)}</span><span className={`store-stock ${soldOut ? "out" : "available"}`}><i />{soldOut ? "Stock agotado" : "Disponible"}</span></div>
           <p className="store-service">{item.service}</p><h2>{item.store_title}</h2><p className="store-description">{item.store_description || "Servicio digital disponible para entrega."}</p>
-          <div className="store-stock-detail">{profilesAvailable ? `${item.available_profiles} perfiles disponibles` : accountAvailable ? "Cuenta disponible" : "Sin existencias por ahora"}</div>
+          <div className="store-stock-detail">{profilesAvailable ? `${item.available_profiles} perfiles disponibles` : accountAvailable ? "Sin perfiles disponibles" : "Sin existencias disponibles"}{accountAvailable && <span> · {item.available_full_accounts || 1} cuentas completas</span>}</div>
           <div className="store-options">
-            <button type="button" className="store-buy-option" disabled={!profilesAvailable} onClick={() => beginPurchase(item, "profile")}><span><strong>Elegir perfil</strong><small>{profilesAvailable ? `${item.available_profiles} disponibles` : "Agotado"}</small></span><b>{item.profile_price == null ? "Consultar" : money(item.profile_price)}</b><ArrowRight size={16} /></button>
-            <button type="button" className="store-buy-option" disabled={!accountAvailable} onClick={() => beginPurchase(item, "full_account")}><span><strong>Cuenta completa</strong><small>{accountAvailable ? "Disponible" : "No disponible"}</small></span><b>{item.account_price == null ? "Consultar" : money(item.account_price)}</b><ArrowRight size={16} /></button>
+            <button type="button" className="store-buy-option" disabled={!profilesAvailable || Boolean(purchaseBusy)} onClick={() => beginPurchase(item, "profile")}><span><strong>Solicitar perfil</strong><small>{profilesAvailable ? `${item.available_profiles} disponibles` : "Stock agotado"}</small></span><b>{item.profile_price == null ? "Consultar" : money(item.profile_price)}</b><ArrowRight size={16} /></button>
+            <button type="button" className="store-buy-option" disabled={!accountAvailable || Boolean(purchaseBusy)} onClick={() => beginPurchase(item, "full_account")}><span><strong>Solicitar cuenta completa</strong><small>{accountAvailable ? `${item.available_full_accounts || 1} disponibles` : "Stock agotado"}</small></span><b>{item.account_price == null ? "Consultar" : money(item.account_price)}</b><ArrowRight size={16} /></button>
           </div>
         </article>;
       })}
