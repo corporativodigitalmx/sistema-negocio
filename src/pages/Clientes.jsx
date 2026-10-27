@@ -52,7 +52,7 @@ function accessListFor(client, assignments) {
     .map((row) => {
       const status = assignmentStatus(row).label;
       const service = row.inventory?.service || "Cuenta";
-      const account = row.inventory?.account_label ? " · " + row.inventory.account_label : "";
+      const account = row.inventory?.account_username ? " · " + row.inventory.account_username : " · Usuario no guardado";
       return "• " + service + account + " · " + accessLabel(row) + " · vence " + dateLabel(row.expires_on) + " (" + status + ")";
     });
   if (!entries.length) return "";
@@ -93,7 +93,7 @@ export default function Clientes({ userId, canEdit = true }) {
 
   const reload = useCallback(async () => {
     setLoading(true);
-    const [clientsResult, assignmentsResult, accountsResult, availabilityResult, ordersResult, pendingResult] = await Promise.all([
+    const [clientsResult, assignmentsResult, accountsResult, availabilityResult, ordersResult, pendingResult, usernamesResult] = await Promise.all([
       supabase.from("clients").select("*").order("full_name"),
       supabase.from("client_account_assignments")
         .select("id,user_id,client_id,inventory_account_id,profile_name,delivery_type,assignment_status,starts_on,duration_days,expires_on,notes,created_at,inventory:inventario_cuentas!client_account_assignments_inventory_account_id_fkey(id,service,account_label,provider,user_id)")
@@ -105,19 +105,22 @@ export default function Clientes({ userId, canEdit = true }) {
         .eq("user_id", userId)
         .order("order_date", { ascending: false }),
       supabase.rpc("get_client_pending_items"),
+      supabase.rpc("inventory_account_display_users"),
     ]);
+    const usernameById = new Map((usernamesResult.data || []).map((item) => [item.inventory_account_id, item.account_username || ""]));
     if (clientsResult.error) setNotice("No se pudieron cargar clientes. Detalle: " + clientsResult.error.message);
     else setClients(clientsResult.data || []);
     if (assignmentsResult.error) setNotice("No se pudo cargar el historial de cuentas: " + assignmentsResult.error.message);
-    else setAssignments(assignmentsResult.data || []);
+    else setAssignments((assignmentsResult.data || []).map((item) => ({ ...item, inventory: item.inventory ? { ...item.inventory, account_username: usernameById.get(item.inventory_account_id) || "" } : item.inventory })));
     if (accountsResult.error) setNotice("No se pudieron consultar cuentas del inventario: " + accountsResult.error.message);
-    else setAccounts(accountsResult.data || []);
+    else setAccounts((accountsResult.data || []).map((item) => ({ ...item, account_username: usernameById.get(item.id) || "" })));
     if (!availabilityResult.error) setAvailability(availabilityResult.data || []);
     if (ordersResult.error) setNotice("No se pudieron cargar los pedidos de trámites: " + ordersResult.error.message);
     else setServiceOrders(ordersResult.data || []);
     if (pendingResult.error) setNotice("No se pudieron calcular los saldos pendientes: " + pendingResult.error.message);
     else setPendingItems(pendingResult.data || []);
-    if (![clientsResult, assignmentsResult, accountsResult, ordersResult, pendingResult].some((result) => result.error)) setNotice("");
+    if (usernamesResult.error) setNotice("No se pudieron cargar los usuarios de las cuentas: " + usernamesResult.error.message);
+    if (![clientsResult, assignmentsResult, accountsResult, ordersResult, pendingResult, usernamesResult].some((result) => result.error)) setNotice("");
     setLoading(false);
   }, [userId]);
 
@@ -297,7 +300,7 @@ export default function Clientes({ userId, canEdit = true }) {
     <section className="client-balance-card"><header><div><p className="clients-eyebrow">RESUMEN DE COBRO</p><h2>Saldo pendiente por pagar</h2></div><strong>{money(selectedBalance)}</strong></header>{selectedPendingItems.length ? <><div className="client-balance-lines">{selectedPendingItems.map((item) => <article key={item.item_type + item.item_id}><div><strong>{item.item_type === "procedure" ? "Trámite: " + item.label : item.label + (item.details ? " · " + item.details : "")}</strong><small>{item.item_type === "sale" ? "Venta del " : "Pedido del "}{dateLabel(item.item_date)}{item.item_type === "sale" && Number(item.paid) > 0 ? " · abonos " + money(item.paid) : ""}</small></div><b>{money(item.balance)}</b></article>)}</div>{selectedBalanceLink ? <a className="whatsapp-button" href={selectedBalanceLink} target="_blank" rel="noreferrer"><MessageCircle size={17} /> Preparar saldo por WhatsApp</a> : <p className="phone-missing">Agrega un número válido para preparar el mensaje de WhatsApp.</p>}<small className="client-balance-footnote">Incluye ventas pendientes después de abonos y pedidos de trámites aún no pagados. El mensaje solo se envía cuando lo confirmes en WhatsApp.</small></> : <p className="client-balance-empty">Este cliente no tiene pagos pendientes registrados.</p>}</section>
     {canEdit && <form className="client-assignment-form" onSubmit={assignAccount}>
       <div className="client-form-heading"><div><p className="clients-eyebrow">NUEVA ASIGNACIÓN</p><h2>Asignar cuenta o perfil</h2></div><span>Duración fija: <strong>28 días</strong></span></div>
-      <label>Cuenta del inventario<select value={assignmentForm.inventory_account_id} onChange={(event) => setAssignmentForm((current) => ({ ...current, inventory_account_id: event.target.value }))} required><option value="">Selecciona una cuenta disponible</option>{accounts.filter((account) => availability.find((item) => item.inventory_account_id === account.id)?.available_profiles > 0 && !availability.find((item) => item.inventory_account_id === account.id)?.has_full_account).map((account) => { const available = availability.find((item) => item.inventory_account_id === account.id); return <option key={account.id} value={account.id}>{account.service} · {account.account_label} · {available?.available_profiles} perfil(es) libre(s)</option>; })}</select></label>
+      <label>Cuenta del inventario<select value={assignmentForm.inventory_account_id} onChange={(event) => setAssignmentForm((current) => ({ ...current, inventory_account_id: event.target.value }))} required><option value="">Selecciona una cuenta disponible</option>{accounts.filter((account) => availability.find((item) => item.inventory_account_id === account.id)?.available_profiles > 0 && !availability.find((item) => item.inventory_account_id === account.id)?.has_full_account).map((account) => { const available = availability.find((item) => item.inventory_account_id === account.id); return <option key={account.id} value={account.id}>{account.service} · {account.account_username || "Usuario no guardado"} · {available?.available_profiles} perfil(es) libre(s)</option>; })}</select></label>
       <label>Perfil asignado<input value={assignmentForm.profile_name} onChange={(event) => setAssignmentForm((current) => ({ ...current, profile_name: event.target.value }))} placeholder="Ej. Perfil 2, PIN familiar…" maxLength={80} required /></label>
       <label>Fecha de inicio<input type="date" value={assignmentForm.starts_on} onChange={(event) => setAssignmentForm((current) => ({ ...current, starts_on: event.target.value }))} required /></label>
       <label>Notas (opcional)<input value={assignmentForm.notes} onChange={(event) => setAssignmentForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Observaciones" maxLength={250} /></label>
@@ -306,7 +309,7 @@ export default function Clientes({ userId, canEdit = true }) {
     </form>}
     <section className="client-procedure-panel"><header><div><p className="clients-eyebrow">PEDIDOS Y TRÁMITES</p><h2>Trámites por cliente</h2><p>Registra actas, RFC u otros servicios y su costo pendiente.</p></div></header>{canEdit && <form className="client-procedure-form" onSubmit={createProcedureOrder}><label>Nombre del trámite<input value={procedureForm.procedure_name} onChange={(event) => setProcedureForm((current) => ({ ...current, procedure_name: event.target.value }))} placeholder="Acta de nacimiento, RFC…" maxLength={120} required /></label><label>Costo (MXN)<input type="number" min="0.01" step="0.01" value={procedureForm.amount} onChange={(event) => setProcedureForm((current) => ({ ...current, amount: event.target.value }))} required /></label><label>Fecha del pedido<input type="date" value={procedureForm.order_date} onChange={(event) => setProcedureForm((current) => ({ ...current, order_date: event.target.value }))} required /></label><label className="procedure-notes">Notas (opcional)<input value={procedureForm.notes} onChange={(event) => setProcedureForm((current) => ({ ...current, notes: event.target.value }))} maxLength={300} placeholder="Detalle del trámite" /></label><button className="clients-button primary" disabled={saving}><Plus size={16} />{saving ? "Guardando…" : "Agregar pendiente"}</button></form>}{selectedOrders.length ? <div className="client-procedure-list">{selectedOrders.map((order) => <article key={order.id}><div className="procedure-order-main"><strong>{order.procedure_name}</strong><small>Pedido {dateLabel(order.order_date)}{order.paid_at ? " · pagado " + dateLabel(order.paid_at) : ""}{order.notes ? " · " + order.notes : ""}</small></div><b>{money(order.amount)}</b><span className={"procedure-order-status " + order.status}>{order.status === "pending" ? "Pendiente" : order.status === "paid" ? "Pagado" : "Cancelado"}</span>{canEdit && order.status === "pending" && <div className="procedure-order-actions"><button className="clients-button secondary" type="button" onClick={() => void updateProcedureOrder(order, "paid")} disabled={saving}><Check size={15} /> Marcar pagado</button><button className="procedure-cancel-button" type="button" onClick={() => void updateProcedureOrder(order, "cancelled")} disabled={saving}>Cancelar pedido</button></div>}</article>)}</div> : <p className="client-balance-empty">Todavía no hay trámites registrados para este cliente.</p>}</section>
     <section className="client-history"><div className="client-history-heading"><div><p className="clients-eyebrow">SEGUIMIENTO</p><h2>Historial de cuentas y vencimientos</h2></div><span>{clientAssignments.length} registros</span></div>
-      {clientAssignments.length ? <div className="client-history-list">{clientAssignments.map((row) => { const status = assignmentStatus(row); return <article className="client-history-row" key={row.id}><span className="client-service-mark">{row.inventory?.service?.slice(0, 1) || "C"}</span><div className="client-history-main"><strong>{row.inventory?.service || "Cuenta"} · {accessLabel(row)}</strong><small>{row.inventory?.account_label || "Cuenta de inventario"} · {row.inventory?.provider || ""}</small><small>Inicio {dateLabel(row.starts_on)} · vence {dateLabel(row.expires_on)} · ciclo de {row.duration_days} días</small>{row.notes && <small>{row.notes}</small>}</div><span className={"client-status " + status.key}>{status.label}</span></article>; })}</div> : <div className="clients-empty"><CalendarDays size={24} /><p>Aún no hay cuentas asignadas. Agrega la primera para iniciar el historial.</p></div>}
+      {clientAssignments.length ? <div className="client-history-list">{clientAssignments.map((row) => { const status = assignmentStatus(row); return <article className="client-history-row" key={row.id}><span className="client-service-mark">{row.inventory?.service?.slice(0, 1) || "C"}</span><div className="client-history-main"><strong>{row.inventory?.service || "Cuenta"} · {accessLabel(row)}</strong><small>Usuario: {row.inventory?.account_username || "No guardado"} · {row.inventory?.provider || ""}</small><small>Inicio {dateLabel(row.starts_on)} · vence {dateLabel(row.expires_on)} · ciclo de {row.duration_days} días</small>{row.notes && <small>{row.notes}</small>}</div><span className={"client-status " + status.key}>{status.label}</span></article>; })}</div> : <div className="clients-empty"><CalendarDays size={24} /><p>Aún no hay cuentas asignadas. Agrega la primera para iniciar el historial.</p></div>}
     </section>
   </main>;
 
