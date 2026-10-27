@@ -1,0 +1,45 @@
+.supplier-flow-note {
+  margin: -4px 0 16px;
+  padding: 11px 14px;
+  border: 1px solid rgba(103, 232, 249, .16);
+  border-radius: 10px;
+  background: rgba(7, 25, 41, .58);
+  color: #a7bdcf;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.supplier-form {
+  border-color: rgba(103, 232, 249, .24);
+}
+
+.supplier-actions {
+  min-width: 175px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.supplier-actions .op-text-button {
+  font-size: 11px;
+}
+
+.supplier-payment-history > header > div p {
+  margin: 5px 0 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.supplier-payment-history > header > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .supplier-actions { min-width: 0; }
+  .supplier-payment-history > header { align-items: flex-start; }
+}

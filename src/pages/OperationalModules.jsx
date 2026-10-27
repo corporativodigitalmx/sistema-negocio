@@ -9,20 +9,122 @@ const money = (n) => new Intl.NumberFormat("es-MX", { style: "currency", currenc
 const field = { width: "100%", boxSizing: "border-box", padding: 11, borderRadius: 8, border: "1px solid #334155", background: "#111e32", color: "white", marginTop: 6 };
 const normalizePhone = (value) => String(value || "").replace(/\D/g, "");
 const duplicatePhoneMessage = "Número ya existe en la base de datos";
+const supplierNameKey = (value) => String(value || "").trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toLocaleLowerCase("es-MX");
+const emptySupplierForm = (name = "") => ({ id: "", name, contact_name: "", phone: "", email: "", notes: "" });
 
-export function Suppliers({ userId, canEdit }) {
-  const [rows, setRows] = useState([]), [loading, setLoading] = useState(true), [saving, setSaving] = useState(false), [error, setError] = useState(""), [query, setQuery] = useState("");
-  const [form, setForm] = useState({ id: "", name: "", contact_name: "", phone: "", email: "", notes: "" });
-  const refresh = useCallback(async () => { setLoading(true); const { data, error: e } = await supabase.from("suppliers").select("*").order("name"); if (e) setError(e.message); else { setRows(data || []); setError(""); } setLoading(false); }, []);
+export function Suppliers({ userId, canEdit, canViewInventory, canViewSupplierPayments, canOpenInventory, canOpenPayments }) {
+  const [rows, setRows] = useState([]), [inventoryAccounts, setInventoryAccounts] = useState([]), [procedurePayments, setProcedurePayments] = useState([]);
+  const [loading, setLoading] = useState(true), [saving, setSaving] = useState(false), [error, setError] = useState(""), [query, setQuery] = useState("");
+  const [form, setForm] = useState(null);
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const [suppliers, inventory, payments] = await Promise.all([
+      supabase.from("suppliers").select("id,name,contact_name,phone,email,notes,active,created_at,updated_at").eq("user_id", userId).order("name"),
+      canViewInventory
+        ? supabase.from("inventario_cuentas").select("id,service,provider,cost,purchase_date,inventory_operational_status").eq("user_id", userId).order("purchase_date", { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+      canViewSupplierPayments
+        ? supabase.from("procedure_supplier_payments").select("id,supplier_id,supplier_name,amount,paid_at,method,reference,notes").eq("user_id", userId).order("paid_at", { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (!suppliers.error) setRows(suppliers.data || []);
+    if (!inventory.error) setInventoryAccounts(inventory.data || []);
+    if (!payments.error) setProcedurePayments(payments.data || []);
+    setError([suppliers.error, inventory.error, payments.error].filter(Boolean).map((item) => item.message).join(" · "));
+    setLoading(false);
+  }, [userId, canViewInventory, canViewSupplierPayments]);
   useEffect(() => { queueMicrotask(() => void refresh()); }, [refresh]);
-  const visible = rows.filter((r) => `${r.name} ${r.contact_name} ${r.phone} ${r.email}`.toLowerCase().includes(query.trim().toLowerCase()));
-  async function toggleActive(row) { const { error: updateError } = await supabase.from("suppliers").update({ active: !row.active, updated_at: new Date().toISOString() }).eq("id", row.id); if (updateError) { setError(updateError.message); return; } await refresh(); }
-  async function save(e) { e.preventDefault(); setSaving(true); setError(""); const payload = { user_id: userId, name: form.name.trim(), contact_name: form.contact_name.trim(), phone: form.phone.trim(), email: form.email.trim(), notes: form.notes.trim(), updated_at: new Date().toISOString() }; const req = form.id ? supabase.from("suppliers").update(payload).eq("id", form.id) : supabase.from("suppliers").insert(payload); const { error: e2 } = await req; setSaving(false); if (e2) { setError(e2.message); return; } setForm({ id: "", name: "", contact_name: "", phone: "", email: "", notes: "" }); await refresh(); }
-  return <ModuleShell eyebrow="RELACIONES COMERCIALES" title="Proveedores" subtitle="Directorio de proveedores para tus cuentas y operaciones." icon={<Truck/>} action={canEdit ? <button className="op-button" type="button" onClick={() => setForm({ id: "", name: "", contact_name: "", phone: "", email: "", notes: "" })}><Plus size={17}/> Nuevo proveedor</button> : null}>
-    <div className="op-stats"><Metric icon={<Truck/>} label="Proveedores" value={rows.length}/><Metric icon={<Check/>} label="Activos" value={rows.filter(x=>x.active).length} tone="green"/><Metric icon={<Boxes/>} label="Cuentas registradas" value="Consulta inventario"/></div>
+
+  const inventoryByProvider = new Map();
+  for (const account of inventoryAccounts) {
+    const key = supplierNameKey(account.provider);
+    if (!key) continue;
+    if (!inventoryByProvider.has(key)) inventoryByProvider.set(key, []);
+    inventoryByProvider.get(key).push(account);
+  }
+  const registeredNames = new Set(rows.map((row) => supplierNameKey(row.name)));
+  const inventoryOnlyRows = [...inventoryByProvider.entries()]
+    .filter(([key]) => !registeredNames.has(key))
+    .map(([key, accounts]) => ({ id: `inventory:${key}`, name: accounts[0]?.provider?.trim() || key, contact_name: "", phone: "", email: "", notes: "", active: false, inventoryOnly: true }));
+  const supplierSummaries = [...rows.map((row) => ({ ...row, inventoryOnly: false })), ...inventoryOnlyRows].map((supplier) => {
+    const key = supplierNameKey(supplier.name);
+    const accounts = inventoryByProvider.get(key) || [];
+    const payments = procedurePayments.filter((payment) => payment.supplier_id ? payment.supplier_id === supplier.id : supplierNameKey(payment.supplier_name) === key);
+    const inventoryCost = accounts.reduce((total, account) => total + (account.cost == null || account.cost === "" ? 0 : Number(account.cost)), 0);
+    return {
+      ...supplier,
+      inventoryCount: accounts.length,
+      inventoryCost,
+      missingInventoryCostCount: accounts.filter((account) => account.cost == null || account.cost === "").length,
+      inventoryServices: [...new Set(accounts.map((account) => account.service).filter(Boolean))].join(", "),
+      procedurePaymentCount: payments.length,
+      procedurePaymentTotal: payments.reduce((total, payment) => total + Number(payment.amount || 0), 0),
+      lastProcedurePayment: payments.reduce((latest, payment) => payment.paid_at > latest ? payment.paid_at : latest, ""),
+    };
+  });
+  const searchTerm = query.trim().toLocaleLowerCase("es-MX");
+  const visible = supplierSummaries.filter((supplier) => `${supplier.name} ${supplier.contact_name} ${supplier.phone} ${supplier.email} ${supplier.inventoryServices}`.toLocaleLowerCase("es-MX").includes(searchTerm));
+  const visiblePaymentHistory = procedurePayments.filter((payment) => `${payment.supplier_name} ${payment.method} ${payment.reference} ${payment.notes}`.toLocaleLowerCase("es-MX").includes(searchTerm));
+  const providerLinkedAccounts = inventoryAccounts.filter((account) => supplierNameKey(account.provider));
+  const inventoryCostTotal = providerLinkedAccounts.reduce((total, account) => total + (account.cost == null || account.cost === "" ? 0 : Number(account.cost)), 0);
+  const procedurePaymentTotal = procedurePayments.reduce((total, payment) => total + Number(payment.amount || 0), 0);
+
+  async function toggleActive(row) {
+    const { data: updated, error: updateError } = await supabase.from("suppliers").update({ active: !row.active, updated_at: new Date().toISOString() }).eq("id", row.id).eq("user_id", userId).select("id").maybeSingle();
+    if (updateError || !updated) { setError(updateError?.message || "No se pudo actualizar el proveedor con los permisos actuales."); return; }
+    await refresh();
+  }
+
+  async function save(event) {
+    event.preventDefault();
+    const name = form?.name.trim() || "";
+    if (name.length < 2) { setError("Escribe el nombre del proveedor."); return; }
+    const duplicate = rows.find((row) => row.id !== form.id && supplierNameKey(row.name) === supplierNameKey(name));
+    if (duplicate) { setError("Ya existe un proveedor con ese nombre en tu directorio."); return; }
+    setSaving(true);
+    setError("");
+    const details = { name, contact_name: form.contact_name.trim(), phone: form.phone.trim(), email: form.email.trim(), notes: form.notes.trim(), updated_at: new Date().toISOString() };
+    const request = form.id
+      ? supabase.from("suppliers").update(details).eq("id", form.id).eq("user_id", userId).select("id").maybeSingle()
+      : supabase.from("suppliers").insert({ ...details, user_id: userId }).select("id").single();
+    const { data: saved, error: saveError } = await request;
+    setSaving(false);
+    if (saveError || !saved) { setError(saveError?.message || "No se pudo guardar el proveedor con los permisos actuales."); return; }
+    setForm(null);
+    await refresh();
+  }
+
+  return <ModuleShell eyebrow="RELACIONES COMERCIALES" title="Proveedores" subtitle="Controla el directorio, las cuentas de inventario y los pagos asociados." icon={<Truck/>} action={canEdit ? <button className="op-button" type="button" onClick={() => setForm(emptySupplierForm())}><Plus size={17}/> Nuevo proveedor</button> : null}>
+    <div className="op-stats"><Metric icon={<Truck/>} label="Proveedores registrados" value={rows.length}/><Metric icon={<Check/>} label="Activos" value={rows.filter((row)=>row.active).length} tone="green"/><Metric icon={<Boxes/>} label="Cuentas con proveedor" value={canViewInventory?providerLinkedAccounts.length:"—"}/><Metric icon={<CircleDollarSign/>} label="Costo de inventario asociado" value={canViewInventory?money(inventoryCostTotal):"—"}/><Metric icon={<CreditCard/>} label="Pagado por trámites" value={canViewSupplierPayments?money(procedurePaymentTotal):"—"} tone="amber"/></div>
     {error && <p className="op-notice error">{error}</p>}
-    {canEdit && <form className="op-form" onSubmit={save}><h2>{form.id ? "Editar proveedor" : "Registrar proveedor"}</h2><div className="op-form-grid"><label>Empresa o proveedor<input style={field} required maxLength={120} value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Persona de contacto<input style={field} maxLength={120} value={form.contact_name} onChange={e=>setForm({...form,contact_name:e.target.value})}/></label><label>Teléfono<input type="tel" style={field} maxLength={30} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label><label>Correo<input type="email" style={field} maxLength={254} value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label><label className="wide">Notas<input style={field} maxLength={400} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label></div><div className="op-form-actions"><button className="op-button" disabled={saving}>{saving?"Guardando…":form.id?"Guardar cambios":"Guardar proveedor"}</button>{form.id&&<button type="button" className="op-button secondary" onClick={()=>setForm({id:"",name:"",contact_name:"",phone:"",email:"",notes:""})}>Cancelar</button>}</div></form>}
-    <DataTable title="Directorio" search={query} setSearch={setQuery} loading={loading} empty="Aún no hay proveedores registrados." hasRows={visible.length > 0}><table><thead><tr><th>Proveedor</th><th>Contacto</th><th>Teléfono</th><th>Correo</th><th>Estado</th>{canEdit&&<th></th>}</tr></thead><tbody>{visible.map(r=><tr key={r.id}><td><strong>{r.name}</strong><small>{r.notes||"Proveedor"}</small></td><td>{r.contact_name||"—"}</td><td>{r.phone||"—"}</td><td>{r.email||"—"}</td><td><Status value={r.active?"active":"cancelled"}/></td>{canEdit&&<td><button className="op-text-button" onClick={()=>toggleActive(r)}>{r.active?"Desactivar":"Activar"}</button><button className="op-text-button" onClick={()=>setForm({id:r.id,name:r.name,contact_name:r.contact_name,phone:r.phone,email:r.email,notes:r.notes})}>Editar</button></td>}</tr>)}</tbody></table></DataTable>
+    <p className="supplier-flow-note">Los nombres de proveedor de Inventario aparecen aquí aunque todavía no estén en el directorio. Los pagos de trámites provienen de Pagos y conservan su efecto en la ganancia neta.</p>
+    {canEdit && form && <form className="op-form supplier-form" onSubmit={save}>
+      <h2>{form.id ? "Editar proveedor" : "Registrar proveedor"}</h2>
+      <div className="op-form-grid">
+        <label>Empresa o proveedor<input style={field} required minLength={2} maxLength={120} value={form.name} onChange={(event)=>setForm({...form,name:event.target.value})}/></label>
+        <label>Persona de contacto<input style={field} maxLength={120} value={form.contact_name} onChange={(event)=>setForm({...form,contact_name:event.target.value})}/></label>
+        <label>Teléfono<input type="tel" style={field} maxLength={30} value={form.phone} onChange={(event)=>setForm({...form,phone:event.target.value})}/></label>
+        <label>Correo<input type="email" style={field} maxLength={254} value={form.email} onChange={(event)=>setForm({...form,email:event.target.value})}/></label>
+        <label className="wide">Notas<input style={field} maxLength={400} value={form.notes} onChange={(event)=>setForm({...form,notes:event.target.value})}/></label>
+      </div>
+      <div className="op-form-actions"><button className="op-button" disabled={saving}>{saving?"Guardando…":form.id?"Guardar cambios":"Guardar proveedor"}</button><button type="button" className="op-button secondary" onClick={()=>setForm(null)} disabled={saving}>Cancelar</button></div>
+    </form>}
+    <DataTable title="Proveedores y actividad vinculada" search={query} setSearch={setQuery} loading={loading} empty="No hay proveedores ni nombres de proveedor en Inventario. Registra uno para empezar." hasRows={visible.length > 0}>
+      <table><thead><tr><th>Proveedor</th><th>Cuentas de inventario</th><th>Pagos de trámites</th><th>Estado</th>{canEdit&&<th>Acciones</th>}</tr></thead><tbody>
+        {visible.map((supplier)=><tr key={supplier.id}>
+          <td><strong>{supplier.name}</strong><small>{supplier.inventoryServices||supplier.contact_name||supplier.email||"Sin actividad registrada"}</small></td>
+          <td>{canViewInventory?`${supplier.inventoryCount} cuenta(s) · ${money(supplier.inventoryCost)}`:"—"}{supplier.missingInventoryCostCount>0&&<small>{supplier.missingInventoryCostCount} sin costo capturado</small>}</td>
+          <td>{canViewSupplierPayments?`${money(supplier.procedurePaymentTotal)} · ${supplier.procedurePaymentCount} pago(s)`:"—"}{supplier.lastProcedurePayment&&<small>Último: {new Date(`${supplier.lastProcedurePayment}T12:00:00`).toLocaleDateString("es-MX")}</small>}</td>
+          <td>{supplier.inventoryOnly?<span className="op-status soon">Por registrar</span>:<Status value={supplier.active?"active":"cancelled"}/>}</td>
+          {canEdit&&<td className="supplier-actions">{supplier.inventoryOnly?<button type="button" className="op-text-button" onClick={()=>setForm(emptySupplierForm(supplier.name))}>Agregar al directorio</button>:<><button type="button" className="op-text-button" onClick={()=>void toggleActive(supplier)}>{supplier.active?"Desactivar":"Activar"}</button><button type="button" className="op-text-button" onClick={()=>setForm({id:supplier.id,name:supplier.name,contact_name:supplier.contact_name||"",phone:supplier.phone||"",email:supplier.email||"",notes:supplier.notes||""})}>Editar</button></>}</td>}
+        </tr>)}
+      </tbody></table>
+    </DataTable>
+    {canViewSupplierPayments&&<section className="op-table-card supplier-payment-history">
+      <header><div><h2>Pagos recientes a proveedores de trámites</h2><p>Estos pagos se registran en Pagos y se reflejan en la ganancia del trámite.</p></div>{canOpenPayments&&<Link to="/pagos">Abrir Pagos <ArrowUpRight size={14}/></Link>}</header>
+      {loading?<p className="op-empty">Cargando…</p>:visiblePaymentHistory.length?<div className="op-table-wrap"><table><thead><tr><th>Fecha</th><th>Proveedor</th><th>Método</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>{visiblePaymentHistory.slice(0,20).map((payment)=><tr key={payment.id}><td>{new Date(`${payment.paid_at}T12:00:00`).toLocaleDateString("es-MX")}</td><td><strong>{payment.supplier_name}</strong><small>{payment.notes||"Pago de trámite"}</small></td><td>{payment.method}</td><td>{payment.reference||"—"}</td><td>{money(payment.amount)}</td></tr>)}</tbody></table></div>:<p className="op-empty">Todavía no hay pagos a proveedores de trámites. Puedes registrarlos desde Pagos.</p>}
+    </section>}
+    <div className="op-quick-links">{canOpenInventory&&<Link to="/inventario"><Boxes/> Ver cuentas vinculadas</Link>}{canOpenPayments&&<Link to="/pagos"><CreditCard/> Registrar pagos de trámites</Link>}</div>
   </ModuleShell>;
 }
 

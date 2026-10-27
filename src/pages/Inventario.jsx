@@ -262,7 +262,7 @@ export default function Inventario({ userId, isSuperadmin = false, canViewAll = 
     return () => { active = false; clearTimeout(timer); };
   }, [query, canEdit]);
 
-  useEffect(() => { let active = true; if (canEdit) supabase.from("suppliers").select("name").eq("active", true).order("name").then(({ data }) => { if (active) setSupplierSuggestions(data || []); }); return () => { active = false; }; }, [canEdit]);
+  useEffect(() => { let active = true; if (canEdit) supabase.from("suppliers").select("name").eq("user_id", userId).eq("active", true).order("name").then(({ data }) => { if (active) setSupplierSuggestions(data || []); }); return () => { active = false; }; }, [canEdit, userId]);
 
   useEffect(() => {
     let active = true;
