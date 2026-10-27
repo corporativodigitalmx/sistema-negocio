@@ -11,18 +11,19 @@ const readableDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString("
 const sumSales = (sales, start, end) => sales.filter(sale => sale.sale_date >= start && sale.sale_date <= end && sale.status !== "cancelled").reduce((total, sale) => total + Number(sale.amount || 0), 0);
 
 export default function Dashboard({ user }) {
-  const [loading,setLoading]=useState(true),[error,setError]=useState(""),[data,setData]=useState({clients:[],accounts:[],sales:[],payments:[]});
+  const [loading,setLoading]=useState(true),[error,setError]=useState(""),[data,setData]=useState({clients:[],accounts:[],sales:[],payments:[],procedureSupplierPayments:[]});
   const refresh=useCallback(async()=>{
     setLoading(true);
-    const [c,a,s,p]=await Promise.all([
+    const [c,a,s,p,procedureSupplierPayments]=await Promise.all([
       supabase.from("clients").select("id,full_name,created_at"),
       supabase.from("inventario_cuentas").select("id,service,account_label,purchase_date,customers,provider,cost"),
       supabase.from("sales").select("id,client_name,service,amount,status,sale_date,inventory_account_id").order("sale_date",{ascending:false}),
       supabase.from("payments").select("id,amount,paid_at,sale_id"),
+      supabase.from("procedure_supplier_payments").select("amount,paid_at").eq("user_id",user.id),
     ]);
-    const failed=[c,a,s,p].find(result=>result.error);
+    const failed=[c,a,s,p,procedureSupplierPayments].find(result=>result.error);
     if(failed)setError(failed.error.message);
-    else{setError("");setData({clients:c.data||[],accounts:a.data||[],sales:s.data||[],payments:p.data||[]});}
+    else{setError("");setData({clients:c.data||[],accounts:a.data||[],sales:s.data||[],payments:p.data||[],procedureSupplierPayments:procedureSupplierPayments.data||[]});}
     setLoading(false);
   },[]);
   useEffect(()=>{queueMicrotask(()=>void refresh());},[refresh]);
@@ -43,7 +44,8 @@ export default function Dashboard({ user }) {
   const accountsUsedThisWeek=[...weeklyAccountIds].map(id=>accountsById.get(id));
   const weeklyAccountCost=accountsUsedThisWeek.reduce((total,account)=>total+(account?.cost==null||account?.cost===""?0:Number(account.cost)),0);
   const missingWeeklyCosts=accountsUsedThisWeek.filter(account=>!account||account.cost==null||account.cost==="").length;
-  const weeklyProfit=weeklySales-weeklyAccountCost;
+  const weeklyProcedureSupplierCost=data.procedureSupplierPayments.filter(payment=>payment.paid_at>=weekStart&&payment.paid_at<=weekEnd).reduce((total,payment)=>total+Number(payment.amount||0),0);
+  const weeklyProfit=weeklySales-weeklyAccountCost-weeklyProcedureSupplierCost;
   const paidBySale=new Map(data.payments.reduce((acc,p)=>{acc.set(p.sale_id,(acc.get(p.sale_id)||0)+Number(p.amount));return acc;},new Map()));
   const outstanding=data.sales.filter(s=>s.status==="pending").reduce((a,s)=>a+Math.max(0,Number(s.amount)-(paidBySale.get(s.id)||0)),0);
   const totalPaid=data.payments.reduce((a,p)=>a+Number(p.amount),0);
@@ -63,7 +65,7 @@ export default function Dashboard({ user }) {
       <Metric icon={<CreditCard/>} label="Cuentas" value={loading?"…":data.accounts.length}/>
       <Metric icon={<ArrowDownLeft/>} label="Pagos registrados" value={loading?"…":money(totalPaid)} tone="blue"/>
     </div>
-    {!loading&&<p className="dashboard-finance-note">Semana del {readableDate(weekStart)} al {readableDate(weekEnd)}. La ganancia resta el costo de cada cuenta vinculada a ventas de esta semana, una sola vez. Las ventas canceladas no se cuentan.{missingWeeklyCosts>0&&<> Falta registrar el costo de {missingWeeklyCosts} cuenta(s) usada(s); no se descuenta en el cálculo.</>}</p>}
+    {!loading&&<p className="dashboard-finance-note">Semana del {readableDate(weekStart)} al {readableDate(weekEnd)}. La ganancia resta una vez el costo de cada cuenta vendida y los pagos a proveedores de trámites registrados esta semana. Las ventas canceladas no se cuentan.{missingWeeklyCosts>0&&<> Falta registrar el costo de {missingWeeklyCosts} cuenta(s) usada(s); no se descuenta en el cálculo.</>}</p>}
     <div className="op-dashboard-grid"><section className="op-table-card"><header><h2>Ventas recientes</h2><Link to="/ventas">Ver ventas <ArrowUpRight size={14}/></Link></header>{loading?<p className="op-empty">Cargando…</p>:data.sales.length?<div className="op-table-wrap"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Servicio</th><th>Importe</th><th>Estado</th></tr></thead><tbody>{data.sales.map(s=><tr key={s.id}><td data-label="Fecha">{new Date(`${s.sale_date}T12:00:00`).toLocaleDateString("es-MX")}</td><td data-label="Cliente">{s.client_name}</td><td data-label="Servicio">{s.service}</td><td data-label="Importe">{money(s.amount)}</td><td data-label="Estado"><Status value={s.status}/></td></tr>)}</tbody></table></div>:<p className="op-empty">Todavía no hay ventas registradas. <Link to="/ventas">Registrar una venta</Link></p>}</section><section className="op-table-card"><header><h2>Cuentas por vencer</h2><Link to="/cuentas">Ver cuentas <ArrowUpRight size={14}/></Link></header>{loading?<p className="op-empty">Cargando…</p>:expiring.length?<div className="op-table-wrap"><table><thead><tr><th>Servicio</th><th>Cuenta</th><th>Vencimiento</th></tr></thead><tbody>{expiring.map(r=><tr key={r.id}><td data-label="Servicio">{r.service}</td><td data-label="Cuenta">{r.account_label}</td><td data-label="Vencimiento">{new Date(`${r.expires}T12:00:00`).toLocaleDateString("es-MX")}</td></tr>)}</tbody></table></div>:<p className="op-empty">No hay cuentas por vencer en los próximos 7 días.</p>}</section></div>
     <div className="op-quick-links"><Link to="/clientes"><Users/> Clientes</Link><Link to="/inventario"><Boxes/> Inventario</Link><Link to="/ventas"><ArrowUpRight/> Registrar ventas</Link><Link to="/pagos"><CreditCard/> Capturar pagos</Link></div>
   </main>;

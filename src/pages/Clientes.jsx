@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, CalendarDays, Check, Clock3, Copy,
-  FileText, MessageCircle, Pencil, Plus, Search, UserRound, X
+  CreditCard, FileText, MessageCircle, Pencil, Plus, Search, UserRound, X
 } from "lucide-react";
 import { supabase } from "../lib/supabaseClient";
 import "./Clientes.css";
@@ -70,7 +70,7 @@ function pendingMessage(client, items, total) {
     + lines.join("\n") + "\n\nTotal pendiente: " + money(total) + "\n\nAvísame si tienes alguna duda. ¡Gracias!";
 }
 
-export default function Clientes({ userId, canEdit = true }) {
+export default function Clientes({ userId, canEdit = true, canRecordPayments = false }) {
   const [clients, setClients] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [accounts, setAccounts] = useState([]);
@@ -90,6 +90,8 @@ export default function Clientes({ userId, canEdit = true }) {
   const [accessListText, setAccessListText] = useState("");
   const [procedureForm, setProcedureForm] = useState({ procedure_name: "", amount: "", order_date: today(), notes: "" });
   const [assignmentForm, setAssignmentForm] = useState({ inventory_account_id: "", profile_name: "", starts_on: today(), notes: "" });
+  const [paymentFormOpen, setPaymentFormOpen] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({ amount: "", method: "transferencia", paid_at: today(), reference: "", notes: "" });
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -251,19 +253,42 @@ export default function Clientes({ userId, canEdit = true }) {
   }
 
   async function updateProcedureOrder(order, status) {
-    if (!selected) return;
+    if (!selected || status !== "cancelled") return;
     setNotice("");
     setSaving(true);
-    const { error } = await supabase.from("client_procedure_orders")
-      .update({ status, paid_at: status === "paid" ? today() : null, updated_at: new Date().toISOString() })
-      .eq("id", order.id)
-      .eq("client_id", selected.id);
+    const { error } = await supabase.rpc("cancel_client_procedure_order", { p_order_id: order.id });
     setSaving(false);
     if (error) {
-      setNotice("No se pudo actualizar el pedido: " + error.message);
+      setNotice("No se pudo cancelar el trámite: " + error.message);
       return;
     }
-    setNotice(status === "paid" ? "Trámite marcado como pagado." : "Pedido de trámite cancelado.");
+    setNotice("Pedido de trámite cancelado.");
+    await reload();
+  }
+
+  async function registerClientPayment(event) {
+    event.preventDefault();
+    if (!selected) return;
+    const amount = Number(paymentForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > selectedBalance) {
+      setNotice("Escribe un importe mayor a cero y no mayor al saldo pendiente.");
+      return;
+    }
+    setSaving(true);
+    setNotice("");
+    const { error } = await supabase.rpc("register_client_balance_payment", {
+      p_client_id: selected.id,
+      p_amount: amount,
+      p_method: paymentForm.method,
+      p_paid_at: paymentForm.paid_at,
+      p_reference: paymentForm.reference.trim(),
+      p_notes: paymentForm.notes.trim(),
+    });
+    setSaving(false);
+    if (error) { setNotice("No se pudo registrar el pago: " + error.message); return; }
+    setPaymentFormOpen(false);
+    setPaymentForm({ amount: "", method: "transferencia", paid_at: today(), reference: "", notes: "" });
+    setNotice("Pago registrado y aplicado a los saldos pendientes más antiguos.");
     await reload();
   }
 
@@ -297,17 +322,25 @@ export default function Clientes({ userId, canEdit = true }) {
       <Summary icon={<FileText />} label="Saldo pendiente" value={money(selectedBalance)} tone={selectedBalance > 0 ? "amber" : "green"} />
     </section>
     <section className="client-access-tools"><div><p className="clients-eyebrow">LISTA PARA COMPARTIR</p><h2>Cuentas, perfiles y vencimientos</h2><p>Genera una lista con las fechas de vencimiento y cópiala para enviarla al cliente.</p></div><button className="clients-button secondary" type="button" onClick={copyAccessList} disabled={loading}><Copy size={16} /> Copiar lista</button>{accessListText && <textarea className="client-copy-preview" readOnly aria-label="Lista de cuentas copiada" value={accessListText} rows={Math.min(8, accessListText.split("\n").length + 1)} />}</section>
-    <section className="client-balance-card"><header><div><p className="clients-eyebrow">RESUMEN DE COBRO</p><h2>Saldo pendiente por pagar</h2></div><strong>{money(selectedBalance)}</strong></header>{selectedPendingItems.length ? <><div className="client-balance-lines">{selectedPendingItems.map((item) => <article key={item.item_type + item.item_id}><div><strong>{item.item_type === "procedure" ? "Trámite: " + item.label : item.label + (item.details ? " · " + item.details : "")}</strong><small>{item.item_type === "sale" ? "Venta del " : "Pedido del "}{dateLabel(item.item_date)}{item.item_type === "sale" && Number(item.paid) > 0 ? " · abonos " + money(item.paid) : ""}</small></div><b>{money(item.balance)}</b></article>)}</div>{selectedBalanceLink ? <a className="whatsapp-button" href={selectedBalanceLink} target="_blank" rel="noreferrer"><MessageCircle size={17} /> Preparar saldo por WhatsApp</a> : <p className="phone-missing">Agrega un número válido para preparar el mensaje de WhatsApp.</p>}<small className="client-balance-footnote">Incluye ventas pendientes después de abonos y pedidos de trámites aún no pagados. El mensaje solo se envía cuando lo confirmes en WhatsApp.</small></> : <p className="client-balance-empty">Este cliente no tiene pagos pendientes registrados.</p>}</section>
-    {canEdit && <form className="client-assignment-form" onSubmit={assignAccount}>
-      <div className="client-form-heading"><div><p className="clients-eyebrow">NUEVA ASIGNACIÓN</p><h2>Asignar cuenta o perfil</h2></div><span>Duración fija: <strong>28 días</strong></span></div>
-      <label>Cuenta del inventario<select value={assignmentForm.inventory_account_id} onChange={(event) => setAssignmentForm((current) => ({ ...current, inventory_account_id: event.target.value }))} required><option value="">Selecciona una cuenta disponible</option>{accounts.filter((account) => availability.find((item) => item.inventory_account_id === account.id)?.available_profiles > 0 && !availability.find((item) => item.inventory_account_id === account.id)?.has_full_account).map((account) => { const available = availability.find((item) => item.inventory_account_id === account.id); return <option key={account.id} value={account.id}>{account.service} · {account.account_username || "Usuario no guardado"} · {available?.available_profiles} perfil(es) libre(s)</option>; })}</select></label>
-      <label>Perfil asignado<input value={assignmentForm.profile_name} onChange={(event) => setAssignmentForm((current) => ({ ...current, profile_name: event.target.value }))} placeholder="Ej. Perfil 2, PIN familiar…" maxLength={80} required /></label>
-      <label>Fecha de inicio<input type="date" value={assignmentForm.starts_on} onChange={(event) => setAssignmentForm((current) => ({ ...current, starts_on: event.target.value }))} required /></label>
-      <label>Notas (opcional)<input value={assignmentForm.notes} onChange={(event) => setAssignmentForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Observaciones" maxLength={250} /></label>
-      {assignmentForm.starts_on && <p className="assignment-expiry-preview">Vence el <strong>{dateLabel(new Date(dateValue(assignmentForm.starts_on).getTime() + 28 * 86400000).toISOString().slice(0, 10))}</strong></p>}
-      <button className="clients-button primary" type="submit" disabled={saving}><Plus size={17} />{saving ? "Guardando…" : "Asignar por 28 días"}</button>
-    </form>}
-    <section className="client-procedure-panel"><header><div><p className="clients-eyebrow">PEDIDOS Y TRÁMITES</p><h2>Trámites por cliente</h2><p>Registra actas, RFC u otros servicios y su costo pendiente.</p></div></header>{canEdit && <form className="client-procedure-form" onSubmit={createProcedureOrder}><label>Nombre del trámite<input value={procedureForm.procedure_name} onChange={(event) => setProcedureForm((current) => ({ ...current, procedure_name: event.target.value }))} placeholder="Acta de nacimiento, RFC…" maxLength={120} required /></label><label>Costo (MXN)<input type="number" min="0.01" step="0.01" value={procedureForm.amount} onChange={(event) => setProcedureForm((current) => ({ ...current, amount: event.target.value }))} required /></label><label>Fecha del pedido<input type="date" value={procedureForm.order_date} onChange={(event) => setProcedureForm((current) => ({ ...current, order_date: event.target.value }))} required /></label><label className="procedure-notes">Notas (opcional)<input value={procedureForm.notes} onChange={(event) => setProcedureForm((current) => ({ ...current, notes: event.target.value }))} maxLength={300} placeholder="Detalle del trámite" /></label><button className="clients-button primary" disabled={saving}><Plus size={16} />{saving ? "Guardando…" : "Agregar pendiente"}</button></form>}{selectedOrders.length ? <div className="client-procedure-list">{selectedOrders.map((order) => <article key={order.id}><div className="procedure-order-main"><strong>{order.procedure_name}</strong><small>Pedido {dateLabel(order.order_date)}{order.paid_at ? " · pagado " + dateLabel(order.paid_at) : ""}{order.notes ? " · " + order.notes : ""}</small></div><b>{money(order.amount)}</b><span className={"procedure-order-status " + order.status}>{order.status === "pending" ? "Pendiente" : order.status === "paid" ? "Pagado" : "Cancelado"}</span>{canEdit && order.status === "pending" && <div className="procedure-order-actions"><button className="clients-button secondary" type="button" onClick={() => void updateProcedureOrder(order, "paid")} disabled={saving}><Check size={15} /> Marcar pagado</button><button className="procedure-cancel-button" type="button" onClick={() => void updateProcedureOrder(order, "cancelled")} disabled={saving}>Cancelar pedido</button></div>}</article>)}</div> : <p className="client-balance-empty">Todavía no hay trámites registrados para este cliente.</p>}</section>
+    <section className="client-balance-card">
+      <header><div><p className="clients-eyebrow">RESUMEN DE COBRO</p><h2>Saldo pendiente por pagar</h2></div><strong>{money(selectedBalance)}</strong></header>
+      {selectedPendingItems.length ? <>
+        <div className="client-balance-lines">{selectedPendingItems.map((item) => <article key={item.item_type + item.item_id}><div><strong>{item.item_type === "procedure" ? "Trámite: " + item.label : item.label + (item.details ? " · " + item.details : "")}</strong><small>{item.item_type === "sale" ? "Venta del " : "Pedido del "}{dateLabel(item.item_date)}{Number(item.paid) > 0 ? " · abonado " + money(item.paid) : ""}</small></div><b>{money(item.balance)}</b></article>)}</div>
+        {canRecordPayments && <div className="client-balance-payment-actions"><button className="clients-button primary" type="button" onClick={() => { setPaymentFormOpen((open) => !open); setPaymentForm((current) => ({ ...current, amount: selectedBalance.toFixed(2) })); }} disabled={saving}><CreditCard size={16} /> Registrar pago o abono</button></div>}
+        {paymentFormOpen && canRecordPayments && <form className="client-payment-form" onSubmit={registerClientPayment}>
+          <div><strong>Registrar pago de saldo</strong><small>El abono se aplica primero a los saldos más antiguos. Máximo: {money(selectedBalance)}.</small></div>
+          <label>Importe recibido<input type="number" min="0.01" max={selectedBalance} step="0.01" value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} required /></label>
+          <label>Método<select value={paymentForm.method} onChange={(event) => setPaymentForm({ ...paymentForm, method: event.target.value })}><option value="transferencia">Transferencia</option><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option><option value="otro">Otro</option></select></label>
+          <label>Fecha de pago<input type="date" value={paymentForm.paid_at} onChange={(event) => setPaymentForm({ ...paymentForm, paid_at: event.target.value })} required /></label>
+          <label>Referencia (opcional)<input maxLength="120" value={paymentForm.reference} onChange={(event) => setPaymentForm({ ...paymentForm, reference: event.target.value })} /></label>
+          <label className="client-payment-notes">Notas (opcional)<input maxLength="300" value={paymentForm.notes} onChange={(event) => setPaymentForm({ ...paymentForm, notes: event.target.value })} /></label>
+          <div className="client-payment-actions"><button className="clients-button primary" disabled={saving}>{saving ? "Guardando…" : "Guardar pago"}</button><button className="clients-button secondary" type="button" onClick={() => setPaymentFormOpen(false)} disabled={saving}>Cancelar</button></div>
+        </form>}
+        {selectedBalanceLink ? <a className="whatsapp-button" href={selectedBalanceLink} target="_blank" rel="noreferrer"><MessageCircle size={17} /> Preparar saldo por WhatsApp</a> : <p className="phone-missing">Agrega un número válido para preparar el mensaje de WhatsApp.</p>}
+        <small className="client-balance-footnote">Incluye ventas pendientes después de abonos y pedidos de trámites pendientes. El mensaje solo se envía cuando lo confirmes en WhatsApp.</small>
+      </> : <p className="client-balance-empty">Este cliente no tiene pagos pendientes registrados.</p>}
+    </section>
+    <section className="client-procedure-panel"><header><div><p className="clients-eyebrow">PEDIDOS Y TRÁMITES</p><h2>Trámites por cliente</h2><p>Registra actas, RFC u otros servicios y su costo pendiente.</p></div></header>{canEdit && <form className="client-procedure-form" onSubmit={createProcedureOrder}><label>Nombre del trámite<input value={procedureForm.procedure_name} onChange={(event) => setProcedureForm((current) => ({ ...current, procedure_name: event.target.value }))} placeholder="Acta de nacimiento, RFC…" maxLength={120} required /></label><label>Costo (MXN)<input type="number" min="0.01" step="0.01" value={procedureForm.amount} onChange={(event) => setProcedureForm((current) => ({ ...current, amount: event.target.value }))} required /></label><label>Fecha del pedido<input type="date" value={procedureForm.order_date} onChange={(event) => setProcedureForm((current) => ({ ...current, order_date: event.target.value }))} required /></label><label className="procedure-notes">Notas (opcional)<input value={procedureForm.notes} onChange={(event) => setProcedureForm((current) => ({ ...current, notes: event.target.value }))} maxLength={300} placeholder="Detalle del trámite" /></label><button className="clients-button primary" disabled={saving}><Plus size={16} />{saving ? "Guardando…" : "Agregar pendiente"}</button></form>}{selectedOrders.length ? <div className="client-procedure-list">{selectedOrders.map((order) => <article key={order.id}><div className="procedure-order-main"><strong>{order.procedure_name}</strong><small>Pedido {dateLabel(order.order_date)}{order.paid_at ? " · pagado " + dateLabel(order.paid_at) : ""}{order.notes ? " · " + order.notes : ""}</small></div><b>{money(order.amount)}</b><span className={"procedure-order-status " + order.status}>{order.status === "pending" ? "Pendiente" : order.status === "paid" ? "Pagado" : "Cancelado"}</span>{canEdit && order.status === "pending" && !selectedPendingItems.some((item) => item.item_type === "procedure" && item.item_id === order.id && Number(item.paid) > 0) && <div className="procedure-order-actions"><span>Registra los abonos desde el saldo pendiente.</span><button className="procedure-cancel-button" type="button" onClick={() => void updateProcedureOrder(order, "cancelled")} disabled={saving}>Cancelar pedido</button></div>}{canEdit && order.status === "pending" && selectedPendingItems.some((item) => item.item_type === "procedure" && item.item_id === order.id && Number(item.paid) > 0) && <small>Este trámite tiene abonos; liquídalo desde el saldo pendiente.</small>}</article>)}</div> : <p className="client-balance-empty">Todavía no hay trámites registrados para este cliente.</p>}</section>
     <section className="client-history"><div className="client-history-heading"><div><p className="clients-eyebrow">SEGUIMIENTO</p><h2>Historial de cuentas y vencimientos</h2></div><span>{clientAssignments.length} registros</span></div>
       {clientAssignments.length ? <div className="client-history-list">{clientAssignments.map((row) => { const status = assignmentStatus(row); return <article className="client-history-row" key={row.id}><span className="client-service-mark">{row.inventory?.service?.slice(0, 1) || "C"}</span><div className="client-history-main"><strong>{row.inventory?.service || "Cuenta"} · {accessLabel(row)}</strong><small>Usuario: {row.inventory?.account_username || "No guardado"} · {row.inventory?.provider || ""}</small><small>Inicio {dateLabel(row.starts_on)} · vence {dateLabel(row.expires_on)} · ciclo de {row.duration_days} días</small>{row.notes && <small>{row.notes}</small>}</div><span className={"client-status " + status.key}>{status.label}</span></article>; })}</div> : <div className="clients-empty"><CalendarDays size={24} /><p>Aún no hay cuentas asignadas. Agrega la primera para iniciar el historial.</p></div>}
     </section>

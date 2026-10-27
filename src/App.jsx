@@ -111,7 +111,7 @@ function App() {
           <div className="app-content" style={styles.content}>
             <Routes>
               <Route path="/" element={<AccessGuard allowed={can("dashboard_view")} fallback={landing}><Dashboard user={session.user} /></AccessGuard>} />
-              <Route path="/clientes" element={<AccessGuard allowed={can("clients_view")} fallback={landing}><Clientes userId={session.user.id} canEdit={can("clients_edit")} /></AccessGuard>} />
+              <Route path="/clientes" element={<AccessGuard allowed={can("clients_view")} fallback={landing}><Clientes userId={session.user.id} canEdit={can("clients_edit")} canRecordPayments={can("payments_edit")} /></AccessGuard>} />
               <Route path="/cuentas" element={<AccessGuard allowed={can("accounts_view")} fallback={landing}><Cuentas userId={session.user.id} canEdit={can("inventory_edit")} canNotifyClients={can("clients_view") || can("clients_edit")} /></AccessGuard>} />
               <Route path="/ventas" element={<AccessGuard allowed={can("sales_view")} fallback={landing}><Ventas userId={session.user.id} canEdit={can("sales_edit")} canViewAccounts={can("accounts_view")} canCreateClient={can("clients_edit")} /></AccessGuard>} />
               <Route path="/pagos" element={<AccessGuard allowed={can("payments_view")} fallback={landing}><Pagos userId={session.user.id} canEdit={can("payments_edit")} /></AccessGuard>} />

@@ -103,22 +103,208 @@ export function Sales({ canEdit, canCreateClient = false }) {
 }
 
 export function Payments({ userId, canEdit }) {
+  const [rows, setRows] = useState([]);
+  const [sales, setSales] = useState([]);
+  const [procedurePayments, setProcedurePayments] = useState([]);
+  const [supplierPayments, setSupplierPayments] = useState([]);
+  const [procedureOrders, setProcedureOrders] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [query, setQuery] = useState("");
+  const [form, setForm] = useState({ sale_id: "", amount: "", method: "transferencia", paid_at: today(), reference: "", notes: "" });
+  const [supplierForm, setSupplierForm] = useState({ procedure_order_id: "", supplier_id: "", supplier_name: "", amount: "", method: "transferencia", paid_at: today(), reference: "", notes: "" });
 
-  const [rows,setRows]=useState([]),[sales,setSales]=useState([]),[loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[notice,setNotice]=useState(""),[query,setQuery]=useState("");
-  const [form,setForm]=useState({sale_id:"",amount:"",method:"transferencia",paid_at:today(),reference:"",notes:""});
-  const refresh=useCallback(async()=>{setLoading(true);const [p,s]=await Promise.all([supabase.from("payments").select("*").eq("user_id",userId).order("paid_at",{ascending:false}),supabase.from("sales").select("id,client_name,service,amount,status").eq("user_id",userId).order("sale_date",{ascending:false})]);if(p.error)setNotice(p.error.message);else {setRows(p.data||[]);setNotice("");}if(s.error)setNotice(s.error.message);else setSales(s.data||[]);setLoading(false);},[userId]);
-  useEffect(()=>{queueMicrotask(()=>void refresh());},[refresh]);
-  const selectedSale=sales.find(s=>s.id===form.sale_id); const paidForSale=rows.filter(p=>p.sale_id===form.sale_id).reduce((a,p)=>a+Number(p.amount),0); const balance=selectedSale?Math.max(0,Number(selectedSale.amount)-paidForSale):null;
-  const names=new Map(sales.map(s=>[s.id,`${s.client_name} · ${s.service}`]));const visible=rows.filter(p=>`${names.get(p.sale_id)||"Venta"} ${p.method} ${p.reference}`.toLowerCase().includes(query.trim().toLowerCase()));
-  async function save(e){e.preventDefault();setSaving(true);setNotice("");const {error}=await supabase.rpc("register_sale_payment",{p_sale_id:form.sale_id,p_amount:Number(form.amount),p_method:form.method,p_paid_at:form.paid_at,p_reference:form.reference.trim(),p_notes:form.notes.trim()});setSaving(false);if(error){setNotice(error.message);return;}setForm({sale_id:"",amount:"",method:"transferencia",paid_at:today(),reference:"",notes:""});setNotice("Pago registrado.");await refresh();}
-  return <ModuleShell eyebrow="COBROS Y MOVIMIENTOS" title="Pagos" subtitle="Registra abonos y consulta el historial de cobros." icon={<CreditCard/>}>
-    <div className="op-stats"><Metric icon={<CreditCard/>} label="Pagos registrados" value={rows.length}/><Metric icon={<ArrowDownLeft/>} label="Total cobrado" value={money(rows.reduce((n,r)=>n+Number(r.amount),0))} tone="green"/><Metric icon={<Clock3/>} label="Ventas por cobrar" value={sales.filter(r=>r.status==="pending").length} tone="amber"/></div>
-    {notice&&<p className={`op-notice ${notice.includes("registrado")?"":"error"}`}>{notice}</p>}
-    {canEdit&&<form className="op-form" onSubmit={save}><h2>Registrar pago o abono</h2><div className="op-form-grid"><label className="wide">Venta<select style={field} value={form.sale_id} onChange={e=>setForm({...form,sale_id:e.target.value})} required><option value="">Selecciona una venta</option>{sales.filter(s=>s.status==="pending").map(s=><option value={s.id} key={s.id}>{s.client_name} · {s.service} · {money(s.amount)}</option>)}</select></label>{selectedSale&&<p className="op-balance">Saldo de la venta: <strong>{money(balance)}</strong></p>}<label>Importe recibido<input type="number" min="0.01" max={balance??undefined} step="0.01" style={field} value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} required/></label><label>Método<select style={field} value={form.method} onChange={e=>setForm({...form,method:e.target.value})}><option value="transferencia">Transferencia</option><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option><option value="otro">Otro</option></select></label><label>Fecha de pago<input type="date" style={field} value={form.paid_at} onChange={e=>setForm({...form,paid_at:e.target.value})} required/></label><label>Referencia (opcional)<input style={field} maxLength={120} value={form.reference} onChange={e=>setForm({...form,reference:e.target.value})}/></label><label className="wide">Notas<input style={field} maxLength={300} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label></div><button className="op-button" disabled={saving||!sales.length}>{saving?"Guardando…":"Guardar pago"}</button>{!sales.length&&<small className="op-hint">Primero registra una venta pendiente en el módulo Ventas.</small>}</form>}
-    <DataTable title="Historial de pagos" search={query} setSearch={setQuery} loading={loading} empty="Aún no hay pagos registrados." hasRows={visible.length > 0}><table><thead><tr><th>Fecha</th><th>Venta / cliente</th><th>Método</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>{visible.map(r=><tr key={r.id}><td>{new Date(`${r.paid_at}T12:00:00`).toLocaleDateString("es-MX")}</td><td>{names.get(r.sale_id)||"Venta"}</td><td>{r.method}</td><td>{r.reference||"—"}</td><td><strong>{money(r.amount)}</strong></td></tr>)}</tbody></table></DataTable>
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const [p, s, pp, sp, orders, supplierList] = await Promise.all([
+      supabase.from("payments").select("*").eq("user_id", userId).order("paid_at", { ascending: false }),
+      supabase.from("sales").select("id,client_name,service,amount,status,sale_date,procedure_order_id").eq("user_id", userId).order("sale_date", { ascending: false }),
+      supabase.from("client_procedure_payments").select("id,procedure_order_id,sale_id,amount,paid_at,method").eq("user_id", userId).order("paid_at", { ascending: false }),
+      supabase.from("procedure_supplier_payments").select("id,procedure_order_id,supplier_id,supplier_name,amount,paid_at,method,reference,notes").eq("user_id", userId).order("paid_at", { ascending: false }),
+      supabase.rpc("get_procedure_payment_orders"),
+      supabase.rpc("get_procedure_payment_suppliers"),
+    ]);
+    const failed = [p, s, pp, sp, orders, supplierList].find((result) => result.error);
+    if (failed) setNotice("No se pudieron cargar los pagos: " + failed.error.message);
+    else setNotice("");
+    if (!p.error) setRows(p.data || []);
+    if (!s.error) setSales(s.data || []);
+    if (!pp.error) setProcedurePayments(pp.data || []);
+    if (!sp.error) setSupplierPayments(sp.data || []);
+    if (!orders.error) setProcedureOrders(orders.data || []);
+    if (!supplierList.error) setSuppliers(supplierList.data || []);
+    setLoading(false);
+  }, [userId]);
+
+  useEffect(() => { queueMicrotask(() => void refresh()); }, [refresh]);
+
+  const selectedSale = sales.find((sale) => sale.id === form.sale_id);
+  const paidForSale = rows.filter((payment) => payment.sale_id === form.sale_id).reduce((total, payment) => total + Number(payment.amount), 0);
+  const saleBalance = selectedSale ? Math.max(0, Number(selectedSale.amount) - paidForSale) : null;
+  const paymentNames = new Map(sales.map((sale) => [sale.id, sale.client_name + " · " + sale.service]));
+  const visiblePayments = rows.filter((payment) => [paymentNames.get(payment.sale_id) || "Venta", payment.method, payment.reference].join(" ").toLocaleLowerCase("es-MX").includes(query.trim().toLocaleLowerCase("es-MX")));
+  const orderById = new Map(procedureOrders.map((order) => [order.procedure_order_id, order]));
+  const revenueByOrder = procedurePayments.reduce((totals, payment) => {
+    totals.set(payment.procedure_order_id, (totals.get(payment.procedure_order_id) || 0) + Number(payment.amount));
+    return totals;
+  }, new Map());
+  const costByOrder = supplierPayments.reduce((totals, payment) => {
+    totals.set(payment.procedure_order_id, (totals.get(payment.procedure_order_id) || 0) + Number(payment.amount));
+    return totals;
+  }, new Map());
+  const procedureRevenue = procedurePayments.reduce((total, payment) => total + Number(payment.amount), 0);
+  const supplierTotal = supplierPayments.reduce((total, payment) => total + Number(payment.amount), 0);
+  const procedureProfit = procedureRevenue - supplierTotal;
+  const selectedOrder = procedureOrders.find((order) => order.procedure_order_id === supplierForm.procedure_order_id);
+  const selectedOrderRevenue = selectedOrder ? revenueByOrder.get(selectedOrder.procedure_order_id) || 0 : 0;
+  const selectedOrderCosts = selectedOrder ? costByOrder.get(selectedOrder.procedure_order_id) || 0 : 0;
+  const supplierHistory = supplierPayments.filter((payment) => {
+    const order = orderById.get(payment.procedure_order_id);
+    return [order?.client_name || "", order?.procedure_name || "", payment.supplier_name, payment.method, payment.reference].join(" ").toLocaleLowerCase("es-MX").includes(query.trim().toLocaleLowerCase("es-MX"));
+  });
+
+  async function saveSalePayment(event) {
+    event.preventDefault();
+    setSaving(true);
+    setNotice("");
+    const { error } = await supabase.rpc("register_sale_payment", {
+      p_sale_id: form.sale_id,
+      p_amount: Number(form.amount),
+      p_method: form.method,
+      p_paid_at: form.paid_at,
+      p_reference: form.reference.trim(),
+      p_notes: form.notes.trim(),
+    });
+    setSaving(false);
+    if (error) { setNotice(error.message); return; }
+    setForm({ sale_id: "", amount: "", method: "transferencia", paid_at: today(), reference: "", notes: "" });
+    setNotice("Pago registrado.");
+    await refresh();
+  }
+
+  async function saveSupplierPayment(event) {
+    event.preventDefault();
+    const amount = Number(supplierForm.amount);
+    if (!supplierForm.procedure_order_id || !supplierForm.supplier_name.trim() || !Number.isFinite(amount) || amount <= 0) {
+      setNotice("Selecciona el trámite y registra el proveedor y un importe mayor a cero.");
+      return;
+    }
+    setSaving(true);
+    setNotice("");
+    const { error } = await supabase.from("procedure_supplier_payments").insert({
+      user_id: userId,
+      procedure_order_id: supplierForm.procedure_order_id,
+      supplier_id: supplierForm.supplier_id || null,
+      supplier_name: supplierForm.supplier_name.trim(),
+      amount,
+      method: supplierForm.method,
+      paid_at: supplierForm.paid_at,
+      reference: supplierForm.reference.trim(),
+      notes: supplierForm.notes.trim(),
+    });
+    setSaving(false);
+    if (error) { setNotice("No se pudo guardar el pago al proveedor: " + error.message); return; }
+    setSupplierForm({ procedure_order_id: "", supplier_id: "", supplier_name: "", amount: "", method: "transferencia", paid_at: today(), reference: "", notes: "" });
+    setNotice("Pago al proveedor registrado. La ganancia del trámite se actualizó.");
+    await refresh();
+  }
+
+  const noticeError = notice.startsWith("No se") || notice.startsWith("No tienes") || notice.startsWith("Selecciona");
+  return <ModuleShell eyebrow="COBROS Y MOVIMIENTOS" title="Pagos" subtitle="Registra cobros, abonos y pagos a proveedores de trámites." icon={<CreditCard />}>
+    <div className="op-stats">
+      <Metric icon={<CreditCard />} label="Pagos registrados" value={rows.length} />
+      <Metric icon={<ArrowDownLeft />} label="Total cobrado" value={money(rows.reduce((total, row) => total + Number(row.amount), 0))} tone="green" />
+      <Metric icon={<Clock3 />} label="Ventas por cobrar" value={sales.filter((sale) => sale.status === "pending").length} tone="amber" />
+    </div>
+    {notice && <p className={"op-notice " + (noticeError ? "error" : "")} role="status">{notice}</p>}
+    {canEdit && <form className="op-form" onSubmit={saveSalePayment}>
+      <h2>Registrar pago o abono de venta</h2>
+      <div className="op-form-grid">
+        <label className="wide">Venta
+          <select style={field} value={form.sale_id} onChange={(event) => setForm({ ...form, sale_id: event.target.value })} required>
+            <option value="">Selecciona una venta</option>
+            {sales.filter((sale) => sale.status === "pending").map((sale) => <option value={sale.id} key={sale.id}>{sale.client_name} · {sale.service} · {money(sale.amount)}</option>)}
+          </select>
+        </label>
+        {selectedSale && <p className="op-balance wide">Saldo de la venta: <strong>{money(saleBalance)}</strong></p>}
+        <label>Importe recibido<input type="number" min="0.01" max={saleBalance ?? undefined} step="0.01" style={field} value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value })} required /></label>
+        <label>Método<select style={field} value={form.method} onChange={(event) => setForm({ ...form, method: event.target.value })}><option value="transferencia">Transferencia</option><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option><option value="otro">Otro</option></select></label>
+        <label>Fecha de pago<input type="date" style={field} value={form.paid_at} onChange={(event) => setForm({ ...form, paid_at: event.target.value })} required /></label>
+        <label>Referencia (opcional)<input style={field} maxLength="120" value={form.reference} onChange={(event) => setForm({ ...form, reference: event.target.value })} /></label>
+        <label className="wide">Notas<input style={field} maxLength="300" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></label>
+      </div>
+      <button className="op-button" disabled={saving || !sales.some((sale) => sale.status === "pending")}>{saving ? "Guardando…" : "Guardar pago"}</button>
+      {!sales.some((sale) => sale.status === "pending") && <small className="op-hint">No hay ventas pendientes por cobrar.</small>}
+    </form>}
+    <section className="op-table-card procedure-supplier-section">
+      <header><div><h2>Ganancia de trámites</h2><p>Ganancia acumulada a partir de los pagos recibidos y los costos pagados a proveedores.</p></div></header>
+      <div className="op-stats">
+        <Metric icon={<ArrowDownLeft />} label="Cobrado por trámites" value={money(procedureRevenue)} tone="green" />
+        <Metric icon={<Truck />} label="Pagado a proveedores" value={money(supplierTotal)} tone="amber" />
+        <Metric icon={<CircleDollarSign />} label="Ganancia neta acumulada" value={money(procedureProfit)} tone={procedureProfit >= 0 ? "green" : "red"} />
+      </div>
+      {canEdit && <form className="op-form procedure-supplier-form" onSubmit={saveSupplierPayment}>
+        <h2>Registrar pago a proveedor de trámite</h2>
+        <div className="op-form-grid">
+          <label className="wide">Trámite y cliente
+            <select style={field} value={supplierForm.procedure_order_id} onChange={(event) => setSupplierForm({ ...supplierForm, procedure_order_id: event.target.value })} required>
+              <option value="">Selecciona un trámite</option>
+              {procedureOrders.map((order) => <option value={order.procedure_order_id} key={order.procedure_order_id}>{order.client_name} · {order.procedure_name} · pedido {new Date(String(order.order_date) + "T12:00:00").toLocaleDateString("es-MX")}</option>)}
+            </select>
+          </label>
+          <label>Proveedor registrado (opcional)
+            <select style={field} value={supplierForm.supplier_id} onChange={(event) => {
+              const supplier = suppliers.find((item) => item.supplier_id === event.target.value);
+              setSupplierForm({ ...supplierForm, supplier_id: event.target.value, supplier_name: supplier?.name || supplierForm.supplier_name });
+            }}>
+              <option value="">Capturar nombre manualmente</option>
+              {suppliers.filter((supplier) => supplier.active).map((supplier) => <option value={supplier.supplier_id} key={supplier.supplier_id}>{supplier.name}</option>)}
+            </select>
+          </label>
+          <label>Nombre del proveedor
+            <input style={field} maxLength="120" value={supplierForm.supplier_name} onChange={(event) => setSupplierForm({ ...supplierForm, supplier_name: event.target.value })} required />
+          </label>
+          <label>Importe pagado<input type="number" min="0.01" step="0.01" style={field} value={supplierForm.amount} onChange={(event) => setSupplierForm({ ...supplierForm, amount: event.target.value })} required /></label>
+          <label>Método<select style={field} value={supplierForm.method} onChange={(event) => setSupplierForm({ ...supplierForm, method: event.target.value })}><option value="transferencia">Transferencia</option><option value="efectivo">Efectivo</option><option value="tarjeta">Tarjeta</option><option value="otro">Otro</option></select></label>
+          <label>Fecha de pago<input type="date" style={field} value={supplierForm.paid_at} onChange={(event) => setSupplierForm({ ...supplierForm, paid_at: event.target.value })} required /></label>
+          <label>Referencia (opcional)<input style={field} maxLength="120" value={supplierForm.reference} onChange={(event) => setSupplierForm({ ...supplierForm, reference: event.target.value })} /></label>
+          <label className="wide">Notas<input style={field} maxLength="300" value={supplierForm.notes} onChange={(event) => setSupplierForm({ ...supplierForm, notes: event.target.value })} /></label>
+          {selectedOrder && <p className="op-balance wide">Trámite: {money(selectedOrder.amount)} · cobrado: {money(selectedOrderRevenue)} · costos de proveedor: {money(selectedOrderCosts)} · ganancia actual: <strong>{money(selectedOrderRevenue - selectedOrderCosts)}</strong></p>}
+        </div>
+        <button className="op-button" disabled={saving || !procedureOrders.length}>{saving ? "Guardando…" : "Guardar pago al proveedor"}</button>
+        {!procedureOrders.length && <small className="op-hint">Agrega primero un pedido de trámite en la ficha de un cliente.</small>}
+      </form>}
+    </section>
+    <DataTable title="Historial de pagos a proveedores de trámites" search={query} setSearch={setQuery} loading={loading} empty="Aún no hay pagos a proveedores de trámites." hasRows={supplierHistory.length > 0}>
+      <table><thead><tr><th>Fecha</th><th>Trámite / cliente</th><th>Proveedor</th><th>Pago</th><th>Cobrado al cliente</th><th>Ganancia neta actual</th></tr></thead>
+        <tbody>{supplierHistory.map((payment) => {
+          const order = orderById.get(payment.procedure_order_id);
+          const received = revenueByOrder.get(payment.procedure_order_id) || 0;
+          const costs = costByOrder.get(payment.procedure_order_id) || 0;
+          return <tr key={payment.id}>
+            <td>{new Date(String(payment.paid_at) + "T12:00:00").toLocaleDateString("es-MX")}</td>
+            <td><strong>{order?.procedure_name || "Trámite"}</strong><small>{order?.client_name || "Cliente"}</small></td>
+            <td>{payment.supplier_name}</td>
+            <td><strong>{money(payment.amount)}</strong><small>{payment.method}</small></td>
+            <td>{money(received)}</td>
+            <td><strong>{money(received - costs)}</strong></td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </DataTable>
+    <DataTable title="Historial de cobros de clientes" search={query} setSearch={setQuery} loading={loading} empty="Aún no hay pagos registrados." hasRows={visiblePayments.length > 0}>
+      <table><thead><tr><th>Fecha</th><th>Venta / cliente</th><th>Método</th><th>Referencia</th><th>Importe</th></tr></thead>
+        <tbody>{visiblePayments.map((payment) => <tr key={payment.id}>
+          <td>{new Date(String(payment.paid_at) + "T12:00:00").toLocaleDateString("es-MX")}</td>
+          <td>{paymentNames.get(payment.sale_id) || "Venta"}</td>
+          <td>{payment.method}</td><td>{payment.reference || "—"}</td><td><strong>{money(payment.amount)}</strong></td>
+        </tr>)}</tbody>
+      </table>
+    </DataTable>
   </ModuleShell>;
 }
-
 export function Accounts({ canEdit, canNotifyClients = false }) {
   const [rows,setRows]=useState([]),[assignments,setAssignments]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(""),[query,setQuery]=useState("");
   const refresh=useCallback(async()=>{
