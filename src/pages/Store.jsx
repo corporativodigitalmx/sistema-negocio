@@ -6,6 +6,27 @@ import "./Store.css";
 const money = (value) => new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(value || 0));
 
 export default function Store() {
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+    try {
+      const storageKey = "sistema-negocio:store-visit-session:v1";
+      let sessionId = window.sessionStorage.getItem(storageKey);
+      if (!sessionId) {
+        sessionId = globalThis.crypto?.randomUUID?.();
+        if (!sessionId) return;
+        window.sessionStorage.setItem(storageKey, sessionId);
+      }
+      void fetch("/api/track-visit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch {
+      // El registro de visitas nunca debe interrumpir la tienda.
+    }
+  }, []);
+
   const [session, setSession] = useState(null);
   const [customer, setCustomer] = useState(null);
   const [isSuperadmin, setIsSuperadmin] = useState(false);
