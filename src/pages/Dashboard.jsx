@@ -9,6 +9,23 @@ const formatDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1
 const dateOnly = (offset = 0, base = new Date()) => { const date = new Date(base); date.setDate(date.getDate() + offset); return formatDate(date); };
 const readableDate = (date) => new Date(`${date}T12:00:00`).toLocaleDateString("es-MX", { day: "numeric", month: "short" });
 const sumSales = (sales, start, end) => sales.filter(sale => sale.sale_date >= start && sale.sale_date <= end && sale.status !== "cancelled").reduce((total, sale) => total + Number(sale.amount || 0), 0);
+const accountCostsForSales = (sales, accountsById) => {
+  const allocations = sales.map(sale => {
+    const account = sale.inventory_account_id ? accountsById.get(sale.inventory_account_id) : null;
+    const deliveryType = sale.delivery_type || (String(sale.profile_name || "").trim().toLocaleLowerCase("es-MX") === "cuenta completa" ? "full_account" : "profile");
+    const accountCost = account?.cost == null || account.cost === "" ? null : Number(account.cost);
+    const capacity = Number(account?.profile_capacity);
+    const validCost = Number.isFinite(accountCost) && accountCost >= 0;
+    const validCapacity = Number.isInteger(capacity) && capacity > 0;
+    const allocatedCost = validCost && account && deliveryType === "full_account" ? accountCost :
+      validCost && account && deliveryType === "profile" && validCapacity ? accountCost / capacity : null;
+    return { sale, allocatedCost };
+  });
+  return {
+    total: allocations.reduce((total, item) => total + (item.allocatedCost ?? 0), 0),
+    missingCount: new Set(allocations.filter(item => item.allocatedCost == null).map(({ sale }) => sale.inventory_account_id || `sale:${sale.id}`)).size,
+  };
+};
 
 export default function Dashboard({ user }) {
   const [loading,setLoading]=useState(true),[error,setError]=useState(""),[data,setData]=useState({clients:[],accounts:[],sales:[],payments:[],procedureSupplierPayments:[]});
@@ -25,7 +42,7 @@ export default function Dashboard({ user }) {
     if(failed)setError(failed.error.message);
     else{setError("");setData({clients:c.data||[],accounts:a.data||[],sales:s.data||[],payments:p.data||[],procedureSupplierPayments:procedureSupplierPayments.data||[]});}
     setLoading(false);
-  },[]);
+  },[user.id]);
   useEffect(()=>{queueMicrotask(()=>void refresh());},[refresh]);
 
   const today=dateOnly();
@@ -37,24 +54,16 @@ export default function Dashboard({ user }) {
   const monthEnd=dateOnly(-1,new Date(currentDate.getFullYear(),currentDate.getMonth()+1,1));
   const todaySales=sumSales(data.sales,today,today);
   const weekSalesRows=data.sales.filter(sale=>sale.sale_date>=weekStart&&sale.sale_date<=weekEnd&&sale.status!=="cancelled");
+  const monthSalesRows=data.sales.filter(sale=>sale.sale_date>=monthStart&&sale.sale_date<=monthEnd&&sale.status!=="cancelled");
   const weeklySales=sumSales(data.sales,weekStart,weekEnd);
   const monthlySales=sumSales(data.sales,monthStart,monthEnd);
   const accountsById=new Map(data.accounts.map(account=>[account.id,account]));
-  const weeklyCostAllocations=weekSalesRows.map(sale=>{
-    const account=sale.inventory_account_id?accountsById.get(sale.inventory_account_id):null;
-    const deliveryType=sale.delivery_type||(String(sale.profile_name||"").trim().toLocaleLowerCase("es-MX")==="cuenta completa"?"full_account":"profile");
-    const accountCost=account?.cost==null||account.cost===""?null:Number(account.cost);
-    const capacity=Number(account?.profile_capacity);
-    const validCost=Number.isFinite(accountCost)&&accountCost>=0;
-    const validCapacity=Number.isInteger(capacity)&&capacity>0;
-    const allocatedCost=validCost&&account&&deliveryType==="full_account"?accountCost:
-      validCost&&account&&deliveryType==="profile"&&validCapacity?accountCost/capacity:null;
-    return {sale,allocatedCost};
-  });
-  const weeklyAccountCost=weeklyCostAllocations.reduce((total,item)=>total+(item.allocatedCost??0),0);
-  const missingWeeklyCosts=new Set(weeklyCostAllocations.filter(item=>item.allocatedCost==null).map(({sale})=>sale.inventory_account_id||`sale:${sale.id}`)).size;
+  const weeklyAccountCosts=accountCostsForSales(weekSalesRows,accountsById);
+  const monthlyAccountCosts=accountCostsForSales(monthSalesRows,accountsById);
   const weeklyProcedureSupplierCost=data.procedureSupplierPayments.filter(payment=>payment.paid_at>=weekStart&&payment.paid_at<=weekEnd).reduce((total,payment)=>total+Number(payment.amount||0),0);
-  const weeklyProfit=weeklySales-weeklyAccountCost-weeklyProcedureSupplierCost;
+  const monthlyProcedureSupplierCost=data.procedureSupplierPayments.filter(payment=>payment.paid_at>=monthStart&&payment.paid_at<=monthEnd).reduce((total,payment)=>total+Number(payment.amount||0),0);
+  const weeklyProfit=weeklySales-weeklyAccountCosts.total-weeklyProcedureSupplierCost;
+  const monthlyProfit=monthlySales-monthlyAccountCosts.total-monthlyProcedureSupplierCost;
   const paidBySale=new Map(data.payments.reduce((acc,p)=>{acc.set(p.sale_id,(acc.get(p.sale_id)||0)+Number(p.amount));return acc;},new Map()));
   const outstanding=data.sales.filter(s=>s.status==="pending").reduce((a,s)=>a+Math.max(0,Number(s.amount)-(paidBySale.get(s.id)||0)),0);
   const totalPaid=data.payments.reduce((a,p)=>a+Number(p.amount),0);
@@ -69,12 +78,13 @@ export default function Dashboard({ user }) {
       <Metric icon={<ArrowUpRight/>} label="Ventas de la semana (lun-dom)" value={loading?"…":money(weeklySales)} tone="blue"/>
       <Metric icon={<CalendarDays/>} label="Ventas del mes calendario" value={loading?"…":money(monthlySales)} tone="blue"/>
       <Metric icon={<CircleDollarSign/>} label="Ganancia semanal" value={loading?"…":money(weeklyProfit)} tone={weeklyProfit>=0?"green":"red"}/>
+      <Metric icon={<CalendarDays/>} label="Ganancia del mes calendario" value={loading?"…":money(monthlyProfit)} tone={monthlyProfit>=0?"green":"red"}/>
       <Metric icon={<Users/>} label="Clientes" value={loading?"…":data.clients.length}/>
       <Metric icon={<AlertTriangle/>} label="Por cobrar" value={loading?"…":money(outstanding)} tone="amber"/>
       <Metric icon={<CreditCard/>} label="Cuentas" value={loading?"…":data.accounts.length}/>
       <Metric icon={<ArrowDownLeft/>} label="Pagos registrados" value={loading?"…":money(totalPaid)} tone="blue"/>
     </div>
-    {!loading&&<p className="dashboard-finance-note">Semana del {readableDate(weekStart)} al {readableDate(weekEnd)}. La ganancia resta a cada perfil su parte del costo de la cuenta (costo dividido entre sus perfiles); si se vende la cuenta completa, resta el costo total. También resta los pagos a proveedores de trámites de esta semana. Las ventas canceladas no se cuentan.{missingWeeklyCosts>0&&<> No se pudo calcular el costo de {missingWeeklyCosts} venta(s) o cuenta(s) por falta de cuenta vinculada, costo o capacidad registrada.</>}</p>}
+    {!loading&&<p className="dashboard-finance-note">Semana del {readableDate(weekStart)} al {readableDate(weekEnd)} y mes calendario del {readableDate(monthStart)} al {readableDate(monthEnd)}. En ambos periodos, la ganancia resta a cada perfil su parte del costo de la cuenta (costo dividido entre sus perfiles); si se vende la cuenta completa, resta el costo total. También resta los pagos a proveedores de trámites realizados durante cada periodo. Las ventas canceladas no se cuentan.{weeklyAccountCosts.missingCount>0&&<> Falta calcular el costo de {weeklyAccountCosts.missingCount} venta(s) o cuenta(s) de esta semana.</>}{monthlyAccountCosts.missingCount>0&&<> Falta calcular el costo de {monthlyAccountCosts.missingCount} venta(s) o cuenta(s) de este mes.</>}</p>}
     <div className="op-dashboard-grid"><section className="op-table-card"><header><h2>Ventas recientes</h2><Link to="/ventas">Ver ventas <ArrowUpRight size={14}/></Link></header>{loading?<p className="op-empty">Cargando…</p>:data.sales.length?<div className="op-table-wrap"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Servicio</th><th>Importe</th><th>Estado</th></tr></thead><tbody>{data.sales.map(s=><tr key={s.id}><td data-label="Fecha">{new Date(`${s.sale_date}T12:00:00`).toLocaleDateString("es-MX")}</td><td data-label="Cliente">{s.client_name}</td><td data-label="Servicio">{s.service}</td><td data-label="Importe">{money(s.amount)}</td><td data-label="Estado"><Status value={s.status}/></td></tr>)}</tbody></table></div>:<p className="op-empty">Todavía no hay ventas registradas. <Link to="/ventas">Registrar una venta</Link></p>}</section><section className="op-table-card"><header><h2>Cuentas por vencer</h2><Link to="/cuentas">Ver cuentas <ArrowUpRight size={14}/></Link></header>{loading?<p className="op-empty">Cargando…</p>:expiring.length?<div className="op-table-wrap"><table><thead><tr><th>Servicio</th><th>Cuenta</th><th>Vencimiento</th></tr></thead><tbody>{expiring.map(r=><tr key={r.id}><td data-label="Servicio">{r.service}</td><td data-label="Cuenta">{r.account_label}</td><td data-label="Vencimiento">{new Date(`${r.expires}T12:00:00`).toLocaleDateString("es-MX")}</td></tr>)}</tbody></table></div>:<p className="op-empty">No hay cuentas por vencer en los próximos 7 días.</p>}</section></div>
     <div className="op-quick-links"><Link to="/clientes"><Users/> Clientes</Link><Link to="/inventario"><Boxes/> Inventario</Link><Link to="/ventas"><ArrowUpRight/> Registrar ventas</Link><Link to="/pagos"><CreditCard/> Capturar pagos</Link></div>
   </main>;
