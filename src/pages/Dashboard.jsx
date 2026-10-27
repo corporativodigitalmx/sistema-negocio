@@ -16,8 +16,8 @@ export default function Dashboard({ user }) {
     setLoading(true);
     const [c,a,s,p,procedureSupplierPayments]=await Promise.all([
       supabase.from("clients").select("id,full_name,created_at"),
-      supabase.from("inventario_cuentas").select("id,service,account_label,purchase_date,customers,provider,cost"),
-      supabase.from("sales").select("id,client_name,service,amount,status,sale_date,inventory_account_id").order("sale_date",{ascending:false}),
+      supabase.from("inventario_cuentas").select("id,service,account_label,purchase_date,customers,provider,cost,profile_capacity"),
+      supabase.from("sales").select("id,client_name,service,amount,status,sale_date,inventory_account_id,delivery_type,profile_name").order("sale_date",{ascending:false}),
       supabase.from("payments").select("id,amount,paid_at,sale_id"),
       supabase.from("procedure_supplier_payments").select("amount,paid_at").eq("user_id",user.id),
     ]);
@@ -40,10 +40,19 @@ export default function Dashboard({ user }) {
   const weeklySales=sumSales(data.sales,weekStart,weekEnd);
   const monthlySales=sumSales(data.sales,monthStart,monthEnd);
   const accountsById=new Map(data.accounts.map(account=>[account.id,account]));
-  const weeklyAccountIds=new Set(weekSalesRows.map(sale=>sale.inventory_account_id).filter(Boolean));
-  const accountsUsedThisWeek=[...weeklyAccountIds].map(id=>accountsById.get(id));
-  const weeklyAccountCost=accountsUsedThisWeek.reduce((total,account)=>total+(account?.cost==null||account?.cost===""?0:Number(account.cost)),0);
-  const missingWeeklyCosts=accountsUsedThisWeek.filter(account=>!account||account.cost==null||account.cost==="").length;
+  const weeklyCostAllocations=weekSalesRows.map(sale=>{
+    const account=sale.inventory_account_id?accountsById.get(sale.inventory_account_id):null;
+    const deliveryType=sale.delivery_type||(String(sale.profile_name||"").trim().toLocaleLowerCase("es-MX")==="cuenta completa"?"full_account":"profile");
+    const accountCost=account?.cost==null||account.cost===""?null:Number(account.cost);
+    const capacity=Number(account?.profile_capacity);
+    const validCost=Number.isFinite(accountCost)&&accountCost>=0;
+    const validCapacity=Number.isInteger(capacity)&&capacity>0;
+    const allocatedCost=validCost&&account&&deliveryType==="full_account"?accountCost:
+      validCost&&account&&deliveryType==="profile"&&validCapacity?accountCost/capacity:null;
+    return {sale,allocatedCost};
+  });
+  const weeklyAccountCost=weeklyCostAllocations.reduce((total,item)=>total+(item.allocatedCost??0),0);
+  const missingWeeklyCosts=new Set(weeklyCostAllocations.filter(item=>item.allocatedCost==null).map(({sale})=>sale.inventory_account_id||`sale:${sale.id}`)).size;
   const weeklyProcedureSupplierCost=data.procedureSupplierPayments.filter(payment=>payment.paid_at>=weekStart&&payment.paid_at<=weekEnd).reduce((total,payment)=>total+Number(payment.amount||0),0);
   const weeklyProfit=weeklySales-weeklyAccountCost-weeklyProcedureSupplierCost;
   const paidBySale=new Map(data.payments.reduce((acc,p)=>{acc.set(p.sale_id,(acc.get(p.sale_id)||0)+Number(p.amount));return acc;},new Map()));
@@ -65,7 +74,7 @@ export default function Dashboard({ user }) {
       <Metric icon={<CreditCard/>} label="Cuentas" value={loading?"…":data.accounts.length}/>
       <Metric icon={<ArrowDownLeft/>} label="Pagos registrados" value={loading?"…":money(totalPaid)} tone="blue"/>
     </div>
-    {!loading&&<p className="dashboard-finance-note">Semana del {readableDate(weekStart)} al {readableDate(weekEnd)}. La ganancia resta una vez el costo de cada cuenta vendida y los pagos a proveedores de trámites registrados esta semana. Las ventas canceladas no se cuentan.{missingWeeklyCosts>0&&<> Falta registrar el costo de {missingWeeklyCosts} cuenta(s) usada(s); no se descuenta en el cálculo.</>}</p>}
+    {!loading&&<p className="dashboard-finance-note">Semana del {readableDate(weekStart)} al {readableDate(weekEnd)}. La ganancia resta a cada perfil su parte del costo de la cuenta (costo dividido entre sus perfiles); si se vende la cuenta completa, resta el costo total. También resta los pagos a proveedores de trámites de esta semana. Las ventas canceladas no se cuentan.{missingWeeklyCosts>0&&<> No se pudo calcular el costo de {missingWeeklyCosts} venta(s) o cuenta(s) por falta de cuenta vinculada, costo o capacidad registrada.</>}</p>}
     <div className="op-dashboard-grid"><section className="op-table-card"><header><h2>Ventas recientes</h2><Link to="/ventas">Ver ventas <ArrowUpRight size={14}/></Link></header>{loading?<p className="op-empty">Cargando…</p>:data.sales.length?<div className="op-table-wrap"><table><thead><tr><th>Fecha</th><th>Cliente</th><th>Servicio</th><th>Importe</th><th>Estado</th></tr></thead><tbody>{data.sales.map(s=><tr key={s.id}><td data-label="Fecha">{new Date(`${s.sale_date}T12:00:00`).toLocaleDateString("es-MX")}</td><td data-label="Cliente">{s.client_name}</td><td data-label="Servicio">{s.service}</td><td data-label="Importe">{money(s.amount)}</td><td data-label="Estado"><Status value={s.status}/></td></tr>)}</tbody></table></div>:<p className="op-empty">Todavía no hay ventas registradas. <Link to="/ventas">Registrar una venta</Link></p>}</section><section className="op-table-card"><header><h2>Cuentas por vencer</h2><Link to="/cuentas">Ver cuentas <ArrowUpRight size={14}/></Link></header>{loading?<p className="op-empty">Cargando…</p>:expiring.length?<div className="op-table-wrap"><table><thead><tr><th>Servicio</th><th>Cuenta</th><th>Vencimiento</th></tr></thead><tbody>{expiring.map(r=><tr key={r.id}><td data-label="Servicio">{r.service}</td><td data-label="Cuenta">{r.account_label}</td><td data-label="Vencimiento">{new Date(`${r.expires}T12:00:00`).toLocaleDateString("es-MX")}</td></tr>)}</tbody></table></div>:<p className="op-empty">No hay cuentas por vencer en los próximos 7 días.</p>}</section></div>
     <div className="op-quick-links"><Link to="/clientes"><Users/> Clientes</Link><Link to="/inventario"><Boxes/> Inventario</Link><Link to="/ventas"><ArrowUpRight/> Registrar ventas</Link><Link to="/pagos"><CreditCard/> Capturar pagos</Link></div>
   </main>;
