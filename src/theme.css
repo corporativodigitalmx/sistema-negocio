@@ -1,0 +1,396 @@
+:root {
+  color-scheme: dark;
+  --hud-cyan: #67e8f9;
+  --hud-blue: #38bdf8;
+  --hud-border: rgba(103, 232, 249, .18);
+  --hud-glass: rgba(8, 22, 38, .76);
+  --hud-glass-strong: rgba(7, 18, 32, .9);
+  --hud-text-muted: #a2b5c9;
+}
+
+body {
+  background-color: #040b14;
+  background-image:
+    radial-gradient(ellipse at 14% 2%, rgba(0, 194, 224, .15), transparent 34%),
+    radial-gradient(ellipse at 90% 18%, rgba(32, 104, 211, .12), transparent 32%),
+    linear-gradient(rgba(90, 205, 235, .025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90, 205, 235, .025) 1px, transparent 1px);
+  background-size: auto, auto, 42px 42px, 42px 42px;
+  background-attachment: fixed;
+}
+
+body::before {
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% -15%, rgba(56, 189, 248, .08), transparent 54%),
+    linear-gradient(180deg, rgba(3, 10, 19, .04), rgba(3, 10, 19, .26));
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+.app-shell {
+  background: transparent !important;
+}
+
+.app-main {
+  background: linear-gradient(145deg, rgba(5, 14, 25, .18), rgba(4, 11, 20, .44));
+}
+
+.app-content {
+  scrollbar-color: rgba(80, 177, 205, .48) rgba(5, 14, 25, .45);
+}
+
+.sidebar {
+  position: relative;
+  z-index: 1;
+  border-right: 1px solid rgba(103, 232, 249, .14);
+  background: linear-gradient(180deg, rgba(5, 17, 30, .94), rgba(4, 13, 24, .82));
+  box-shadow: 12px 0 44px rgba(0, 0, 0, .2), inset -1px 0 rgba(255, 255, 255, .025);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+}
+
+.sidebar .logo h2 {
+  color: #8cecff;
+  text-shadow: 0 0 18px rgba(34, 211, 238, .35);
+}
+
+.sidebar .logo p {
+  color: #91a7bc;
+  letter-spacing: .045em;
+}
+
+.sidebar .nav-item {
+  position: relative;
+  border: 1px solid transparent;
+  color: #a4b6ca;
+  transition: color .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.sidebar .nav-item:hover {
+  border-color: rgba(103, 232, 249, .14);
+  background: rgba(56, 189, 248, .08);
+  color: #e7faff;
+}
+
+.sidebar .nav-item.active {
+  border-color: rgba(103, 232, 249, .3);
+  background: linear-gradient(105deg, rgba(8, 145, 178, .24), rgba(37, 99, 235, .14));
+  color: #baf6ff;
+  box-shadow: inset 0 0 22px rgba(34, 211, 238, .06), 0 0 20px rgba(14, 165, 233, .08);
+}
+
+.sidebar .nav-item.active::before {
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  left: 0;
+  width: 2px;
+  border-radius: 9px;
+  background: var(--hud-cyan);
+  box-shadow: 0 0 12px rgba(103, 232, 249, .85);
+  content: "";
+}
+
+.topbar {
+  border-bottom-color: rgba(103, 232, 249, .15);
+  background: rgba(4, 13, 24, .72);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .12);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+.topbar-label {
+  color: #a6c2d5;
+  letter-spacing: .035em;
+}
+
+.avatar {
+  border: 1px solid rgba(103, 232, 249, .4);
+  background: linear-gradient(135deg, rgba(8, 145, 178, .9), rgba(37, 99, 235, .88));
+  box-shadow: 0 0 18px rgba(34, 211, 238, .2);
+}
+
+.logout-button {
+  border-color: rgba(103, 190, 220, .2);
+  background: rgba(10, 28, 45, .76);
+}
+
+.logout-button:hover {
+  border-color: rgba(103, 232, 249, .38);
+  background: rgba(15, 43, 64, .88);
+}
+
+.app-shell .op-metric,
+.app-shell .op-form,
+.app-shell .op-table-card,
+.app-shell .inventory-stat,
+.app-shell .inventory-panel,
+.app-shell .clients-summary,
+.app-shell .clients-directory,
+.app-shell .client-history,
+.app-shell .client-assignment-form,
+.app-shell .client-edit-form,
+.app-shell .client-access-tools,
+.app-shell .client-balance-card,
+.app-shell .client-procedure-panel,
+.app-shell .renewal-client-list {
+  border-color: var(--hud-border);
+  background: linear-gradient(145deg, rgba(12, 31, 49, .83), rgba(7, 19, 34, .76));
+  box-shadow: 0 16px 48px rgba(0, 0, 0, .2), inset 0 1px rgba(216, 250, 255, .035);
+  -webkit-backdrop-filter: blur(15px);
+  backdrop-filter: blur(15px);
+}
+
+.app-shell .op-metric:hover,
+.app-shell .inventory-stat:hover,
+.app-shell .clients-summary:hover {
+  border-color: rgba(103, 232, 249, .32);
+  box-shadow: 0 0 24px rgba(34, 211, 238, .07), 0 18px 48px rgba(0, 0, 0, .22);
+}
+
+.app-shell .op-heading h1,
+.app-shell .inventory-heading h1,
+.app-shell .clients-heading h1 {
+  text-shadow: 0 0 24px rgba(56, 189, 248, .1);
+}
+
+.app-shell .op-eyebrow,
+.app-shell .inventory-eyebrow,
+.app-shell .clients-eyebrow {
+  color: #73e2f5;
+  text-shadow: 0 0 14px rgba(34, 211, 238, .18);
+}
+
+.app-shell .op-button,
+.app-shell .inv-button.primary,
+.app-shell .clients-button.primary {
+  border: 1px solid rgba(103, 232, 249, .28);
+  background: linear-gradient(110deg, rgba(8, 145, 178, .94), rgba(37, 99, 235, .9));
+  box-shadow: 0 7px 24px rgba(14, 165, 233, .16), inset 0 1px rgba(255, 255, 255, .12);
+}
+
+.app-shell .op-button.secondary,
+.app-shell .inv-button.secondary,
+.app-shell .clients-button.secondary,
+.app-shell .op-text-button,
+.app-shell .op-quick-links a {
+  border-color: rgba(103, 190, 220, .2);
+  background: rgba(10, 27, 44, .72);
+  color: #c5e4f3;
+}
+
+.app-shell .op-button.secondary:hover,
+.app-shell .inv-button.secondary:hover:not(:disabled),
+.app-shell .clients-button.secondary:hover,
+.app-shell .op-text-button:hover,
+.app-shell .op-quick-links a:hover {
+  border-color: rgba(103, 232, 249, .44);
+  background: rgba(13, 45, 66, .8);
+}
+
+.app-shell .op-table-wrap th,
+.app-shell .inventory-table th {
+  color: #9db8ca;
+  border-bottom-color: rgba(103, 232, 249, .16);
+}
+
+.app-shell .op-table-wrap td,
+.app-shell .inventory-table td,
+.app-shell .client-card {
+  border-bottom-color: rgba(119, 174, 198, .12);
+}
+
+.app-shell .op-table-wrap tbody tr:hover,
+.app-shell .inventory-table tbody tr:hover,
+.app-shell .client-card:hover {
+  background: rgba(56, 189, 248, .045);
+}
+
+.app-shell .inventory-toolbar,
+.app-shell .clients-toolbar,
+.app-shell .client-history-heading {
+  border-bottom-color: rgba(103, 232, 249, .14);
+  background: rgba(4, 15, 27, .32);
+}
+
+.app-shell .inventory-search,
+.app-shell .clients-search,
+.app-shell .op-search,
+.app-shell .client-procedure-form,
+.app-shell .client-payment-form,
+.app-shell .client-balance-lines article,
+.app-shell .client-procedure-list > article,
+.app-shell .client-copy-preview,
+.app-shell .inventory-mode-option,
+.app-shell .sales-inline-client,
+.app-shell .sales-delivery-card,
+.app-shell .inventory-access-fields,
+.app-shell .issue-report-card,
+.app-shell .renewal-client-row {
+  border-color: rgba(103, 190, 220, .16);
+  background: rgba(6, 20, 35, .64);
+}
+
+.app-shell .sales-delivery-card {
+  box-shadow: inset 0 1px rgba(216, 250, 255, .04), 0 12px 34px rgba(0, 0, 0, .18);
+}
+
+.app-shell .op-status,
+.app-shell .client-status,
+.app-shell .procedure-order-status {
+  border: 1px solid rgba(160, 190, 210, .12);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.app-shell .op-notice,
+.app-shell .inventory-notice,
+.app-shell .clients-notice {
+  border-color: rgba(103, 232, 249, .2);
+  background: rgba(8, 76, 97, .28);
+  box-shadow: inset 0 1px rgba(216, 250, 255, .045);
+}
+
+.app-shell .op-notice.error,
+.app-shell .inventory-notice.error {
+  border-color: rgba(248, 113, 113, .28);
+  background: rgba(91, 25, 38, .38);
+}
+
+.app-shell .inventory-modal,
+.app-shell .client-modal {
+  border-color: rgba(103, 232, 249, .24);
+  background: rgba(7, 19, 33, .94);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .55), 0 0 36px rgba(34, 211, 238, .06);
+  -webkit-backdrop-filter: blur(22px);
+  backdrop-filter: blur(22px);
+}
+
+.app-shell .inventory-page input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.app-shell .inventory-page select,
+.app-shell .inventory-page textarea,
+.app-shell .op-form input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.app-shell .op-form select,
+.app-shell .op-form textarea,
+.app-shell .client-assignment-form input,
+.app-shell .client-assignment-form select,
+.app-shell .client-edit-form input,
+.app-shell .client-procedure-form input,
+.app-shell .client-payment-form input,
+.app-shell .client-payment-form select,
+.app-shell .client-modal input,
+.app-shell .client-modal textarea {
+  border-color: rgba(117, 189, 218, .22);
+  background-color: rgba(4, 16, 29, .76);
+  color: #e7f5fc;
+  transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+
+.app-shell .inventory-page input:focus,
+.app-shell .inventory-page select:focus,
+.app-shell .inventory-page textarea:focus,
+.app-shell .op-form input:focus,
+.app-shell .op-form select:focus,
+.app-shell .op-form textarea:focus,
+.app-shell .client-assignment-form input:focus,
+.app-shell .client-assignment-form select:focus,
+.app-shell .client-edit-form input:focus,
+.app-shell .client-procedure-form input:focus,
+.app-shell .client-payment-form input:focus,
+.app-shell .client-payment-form select:focus,
+.app-shell .client-modal input:focus,
+.app-shell .client-modal textarea:focus {
+  border-color: rgba(103, 232, 249, .65);
+  background-color: rgba(5, 23, 40, .92);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, .12), 0 0 18px rgba(34, 211, 238, .07);
+}
+
+.app-shell button:focus-visible,
+.app-shell a:focus-visible,
+.auth-page button:focus-visible,
+.store-page button:focus-visible {
+  outline-color: #7be7f6;
+  box-shadow: 0 0 0 4px rgba(34, 211, 238, .14);
+}
+
+.store-page {
+  background-color: #040b14;
+  background-image:
+    radial-gradient(ellipse at 15% 0%, rgba(14, 165, 233, .18), transparent 40%),
+    radial-gradient(ellipse at 92% 20%, rgba(37, 99, 235, .1), transparent 36%),
+    linear-gradient(rgba(90, 205, 235, .022) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90, 205, 235, .022) 1px, transparent 1px);
+  background-size: auto, auto, 42px 42px, 42px 42px;
+  background-attachment: fixed;
+}
+
+.store-card,
+.store-admin-pricing,
+.store-auth-card,
+.auth-card,
+.auth-flyer {
+  border-color: rgba(103, 232, 249, .2);
+  background: linear-gradient(145deg, rgba(13, 32, 51, .82), rgba(6, 18, 32, .78));
+  box-shadow: 0 18px 52px rgba(0, 0, 0, .27), inset 0 1px rgba(216, 250, 255, .04);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+
+.store-card.in-stock:hover,
+.auth-flyer-card:hover {
+  box-shadow: 0 0 26px rgba(34, 211, 238, .13), 0 22px 50px rgba(0, 0, 0, .32);
+}
+
+.store-buy-option,
+.store-auth-card label > span,
+.store-admin-card,
+.auth-input-wrap {
+  border-color: rgba(103, 190, 220, .2);
+  background-color: rgba(4, 16, 29, .72);
+}
+
+.store-buy-option:not(:disabled):hover {
+  border-color: rgba(103, 232, 249, .62);
+  background-color: rgba(8, 35, 54, .86);
+  box-shadow: 0 0 18px rgba(34, 211, 238, .08);
+}
+
+.auth-page {
+  background: radial-gradient(ellipse at 15% 4%, rgba(14, 165, 233, .12), transparent 38%), transparent;
+}
+
+@media (max-width: 760px) {
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid rgba(103, 232, 249, .16);
+    background: rgba(5, 17, 30, .91);
+  }
+
+  .sidebar .nav-item.active::before {
+    top: auto;
+    right: 24%;
+    bottom: 1px;
+    left: 24%;
+    width: auto;
+    height: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar .nav-item,
+  .app-shell button,
+  .app-shell a,
+  .store-page button,
+  .store-page a {
+    scroll-behavior: auto;
+    transition-duration: .01ms !important;
+  }
+}
